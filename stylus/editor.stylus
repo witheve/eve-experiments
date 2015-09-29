@@ -160,13 +160,11 @@ body {
 #stats span:first-child { display:inline-block; width:50px; text-align:right; margin-right:10px; }
 
 #stacksView {
+  margin-top:20px;
   display:flex;
   flex-direction: column;
   flex:1;
   align-items: center;
-  justify-content: center;
-  align-content: center;
-  flex-wrap:wrap;
   .stack {
     z-depth(1);
     padding:40px 40px;
