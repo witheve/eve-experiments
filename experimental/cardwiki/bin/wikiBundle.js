@@ -1,1 +1,0 @@
-console.error("TypeScript error: src/ui.ts(5,29): Error TS2307: Cannot find module 'codemirror'.");
