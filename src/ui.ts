@@ -774,7 +774,7 @@ function queryAutocompleteOptions(isEntity, parsed, text, params, entityId) {
     for(let item in context) {
       totalFound += context[item].length;
     }
-    if(totalFound === 2 && context.entities.length === 1 && context.maybeAttributes.length === 1) {
+    if(totalFound === 2 && (context.entities.length === 1 || context.collections.length === 1) && context.maybeAttributes.length === 1) {
       options.push({score: 4,  action: setCellState, state: "define", text: `Add ${text}`});
     } else if(totalFound === 2 && context.entities.length === 1 && context.attributes.length === 1) {
       options.push({score: 1,  action: setCellState, state: "define", text: `Add another ${context.attributes[0].displayName}`});
@@ -869,12 +869,12 @@ function representAutocompleteOptions(isEntity, parsed, text, params, entityId) 
     options.push({score:1, text: "a link", action: embedAs, rep: "link", params});
   }
   if(isCollection) {
-    options.push({score:1, text: "an index", action: embedAs, rep: "index", params});
+    options.push({score:1, text: "a list", action: embedAs, rep: "index", params});
     options.push({score:1, text: "a directory", action: embedAs, rep: "directory", params});
   }
   if(isEntity) {
     options.push({score:1, text: "a list of related pages", action: embedAs, rep: "related", params});
-    options.push({score:1, text: "a properties table", action: embedAs, rep: "attributes", params});
+    // options.push({score:1, text: "a properties table", action: embedAs, rep: "attributes", params});
   }
   return options;
 }
@@ -916,7 +916,8 @@ function defineAutocompleteOptions(isEntity, parsed, text, params, entityId) {
   } else {
     attribute = context.attributes[0].displayName;
   }
-  let entity = context.entities[0].id;
+  let subject = context.entities[0] || context.collections[0];
+  let entity = subject.id;
   let option:any = {score: 1, action: defineAndEmbed, attribute, entity};
   option.children = [
     {text: attribute},
@@ -1329,12 +1330,12 @@ function attributesUI(entityId, paneId) {
       subItem = items[ix];
     }
     tableChildren.push({id: `${entityId}|${paneId}|${item.eav.attribute}`, c: "attribute", children: [
-      {text: item.eav.attribute},
+      {c: "attribute-name", text: item.eav.attribute},
       group,
     ]});
   }
   tableChildren.push({c: "attribute adder", children: [
-    {t: "input", c: "", placeholder: "property", keydown: handleAttributesKey, input: setAdder, submit: submitAdder, field: "adderAttribute", entityId, value: state.adderAttribute},
+    {t: "input", c: "attribute-name value", placeholder: "property", keydown: handleAttributesKey, input: setAdder, submit: submitAdder, field: "adderAttribute", entityId, value: state.adderAttribute},
     {t: "input", c: "value", placeholder: "value", keydown: handleAttributesKey, input: setAdder, submit: submitAdder, field: "adderValue", entityId, value: state.adderValue},
   ]});
   return {c: "attributes", children: tableChildren};
@@ -1736,6 +1737,14 @@ window.addEventListener("popstate", function(evt) {
   if(paneId === undefined || contains === undefined) return;
   dispatch("ui set search", {paneId, value: contains, popState: true}).commit();
 });
+
+// Prevent backspace from going back
+window.addEventListener("keydown", (event) => {
+  var current = <HTMLElement>event.target;
+  if(current.nodeName !== "INPUT" && current.nodeName !== "TEXTAREA" && current.contentEditable !== "true") {
+    event.preventDefault();
+  }
+})
 
 // @NOTE: Uncomment this to enable the new UI, or type `window["NEUE_UI"] = true; app.render()` into the console to enable it transiently.
 window["NEUE_UI"] = true;
