@@ -70,6 +70,7 @@ app_1.handle("ui focus search", function (changes, _a) {
 });
 app_1.handle("ui set search", function (changes, _a) {
     var paneId = _a.paneId, value = _a.value, peek = _a.peek, x = _a.x, y = _a.y, popState = _a.popState;
+    value = value.trim();
     var displays = app_1.eve.find("display name", { name: value });
     if (displays.length === 1)
         value = displays[0].id;
@@ -202,6 +203,7 @@ app_1.handle("insert query", function (changes, _a) {
     var query = _a.query;
     if (app_1.eve.findOne("query to id", { query: query }))
         return;
+    query = query.trim();
     var parsed = NLQueryParser_1.parse(query);
     if (parsed[0].state === NLQueryParser_1.StateFlags.COMPLETE) {
         var artifacts = parser_1.parseDSL(parsed[0].query.toString());
@@ -235,7 +237,6 @@ app_1.handle("insert implication", function (changes, _a) {
 app_1.handle("remove entity attribute", function (changes, _a) {
     var entity = _a.entity, attribute = _a.attribute, value = _a.value;
     changes.remove("sourced eav", { entity: entity, attribute: attribute, value: value });
-    console.log(changes);
     // @FIXME: Make embeds auto-gc themselves when invalidated.
 });
 app_1.handle("update entity attribute", function (changes, _a) {
@@ -305,7 +306,9 @@ function root() {
         panes.push(pane(paneId));
     }
     if (exports.uiState.prompt.open && exports.uiState.prompt.prompt && !exports.uiState.prompt.paneId) {
-        panes.push({ style: "position: absolute; top: 0; left: 0; bottom: 0; right: 0; z-index: 10; background: rgba(0, 0, 0, 0.0);", click: closePrompt }, exports.uiState.prompt.prompt());
+        panes.push({ c: "shade", click: closePrompt, children: [
+                exports.uiState.prompt.prompt()
+            ] });
     }
     return { c: "wiki-root", id: "root", children: panes, click: removePopup };
 }
@@ -349,7 +352,9 @@ function openPrompt(event, elem) {
     app_1.dispatch("toggle prompt", { prompt: elem.prompt, paneId: elem.paneId, open: true }).commit();
 }
 function closePrompt(event, elem) {
-    app_1.dispatch("toggle prompt", { open: false }).commit();
+    if (event.target === event.currentTarget) {
+        app_1.dispatch("toggle prompt", { open: false }).commit();
+    }
 }
 function navigateParent(event, elem) {
     app_1.dispatch("remove popup", { paneId: elem.paneId })
@@ -379,6 +384,25 @@ function loadFromFile(event, elem) {
         app_1.dispatch("toggle prompt", { prompt: loadedPrompt, open: true }).commit();
     };
     reader.readAsText(file);
+}
+function deleteDatabasePrompt() {
+    return { c: "modal-prompt delete-prompt", children: [
+            { t: "header", c: "flex-row", children: [
+                    { t: "h2", text: "DELETE DATABASE" },
+                    { c: "flex-grow" },
+                    { c: "controls", children: [{ c: "ion-close-round", click: closePrompt }] }
+                ] },
+            { c: "info", text: "This will remove all information currently stored in Eve for you and cannot be undone." },
+            { c: "flex-row", children: [
+                    { t: "button", c: "delete-btn", text: "DELETE EVERYTHING FOREVER", click: nukeDatabase },
+                    { c: "flex-grow" },
+                    { t: "button", text: "Cancel", click: closePrompt },
+                ] }
+        ] };
+}
+function nukeDatabase() {
+    localStorage.clear();
+    window.location.reload();
 }
 function savePrompt() {
     var serialized = localStorage[app_1.eveLocalStorageKey];
@@ -458,7 +482,7 @@ function pane(paneId) {
     var pane = { c: "wiki-pane " + (klass || ""), paneId: paneId, children: [header, disambiguation, content, footer] };
     var pos = app_1.eve.findOne("ui pane position", { pane: paneId });
     if (pos) {
-        pane.style = "left: " + pos.x + "px; top: " + (pos.y + 20) + "px;";
+        pane.style = "left: " + (isNaN(pos.x) ? pos.x : pos.x + "px") + "; top: " + (isNaN(pos.y) ? pos.y : (pos.y + 20) + "px") + ";";
     }
     if (captureClicks) {
         pane.click = preventDefault;
@@ -488,7 +512,8 @@ function paneSettings(paneId) {
     return { t: "ul", c: "settings", children: [
             { t: "li", c: "save-btn", text: "save", prompt: savePrompt, click: openPrompt },
             { t: "li", c: "load-btn", text: "load", prompt: loadPrompt, click: openPrompt },
-            entity && !isSystem ? { t: "li", c: "delete-btn", text: "delete page", entity: entity, paneId: paneId, click: deleteEntity } : undefined
+            entity && !isSystem ? { t: "li", c: "delete-btn", text: "delete page", entity: entity, paneId: paneId, click: deleteEntity } : undefined,
+            { t: "li", c: "delete-btn", text: "DELETE DATABASE", prompt: deleteDatabasePrompt, click: openPrompt },
         ] };
 }
 function search(search, paneId) {
@@ -618,7 +643,6 @@ function getCellParams(content, rawParams) {
         var parsed = NLQueryParser_1.parse(content);
         var currentParse = parsed[0];
         var context_1 = currentParse.context;
-        console.log(content, currentParse);
         var hasCollections = context_1.collections.length;
         var field;
         var rep;
@@ -964,7 +988,6 @@ function definePropertyAndEmbed(elem, value, doEmbed) {
         value = "= " + value;
     }
     var success = handleAttributeDefinition(entityId, defineValue, value);
-    console.log("SUCCESS", success);
     var entityName = app_1.eve.findOne("display name", { id: entityId }).name;
     doEmbed(entityName + "'s " + defineValue + "|rep=CSV;field=" + defineValue);
 }
@@ -1063,7 +1086,7 @@ function interpretAttributeValue(value) {
     if (cleaned[0] === "=") {
         //parse it
         cleaned = cleaned.substring(1).trim();
-        var display = app_1.eve.findOne("display name", { name: cleaned });
+        var display = app_1.eve.findOne("display name", { name: cleaned }) || app_1.eve.findOne("display name", { id: cleaned });
         if (display) {
             return { isValue: true, value: display.id };
         }
@@ -1080,7 +1103,6 @@ function handleAttributeDefinition(entity, attribute, search, chain) {
     }
     var _a = interpretAttributeValue(search), isValue = _a.isValue, value = _a.value, parse = _a.parse;
     if (isValue) {
-        console.log("ADDED SOURCED EAV", entity, attribute, value);
         chain.dispatch("add sourced eav", { entity: entity, attribute: attribute, value: value }).commit();
     }
     else {
@@ -1142,7 +1164,7 @@ function entity(entityId, paneId, kind, options) {
         return { text: "Could not find the requested page" };
     var page = app_1.eve.findOne("entity page", { entity: entityId })["page"];
     var name = app_1.eve.findOne("display name", { id: entityId }).name;
-    var cells = getCells(content);
+    var cells = getCells(content, paneId);
     var keys = {
         "Backspace": function (cm) { return maybeActivateCell(cm, paneId); },
         "Cmd-Enter": function (cm) { return maybeNavigate(cm, paneId); },
@@ -1206,6 +1228,9 @@ function maybeActivateCell(cm, paneId) {
         if (cell) {
             var query = cell.query.split("|")[0];
             app_1.dispatch("addActiveCell", { id: cell.id, cell: cell, query: query }).commit();
+            return;
+        }
+        else if (pos.line === 1 && pos.ch === 0) {
             return;
         }
     }
@@ -1280,19 +1305,21 @@ function activateCell(event, elem) {
     var cell = elem.cell;
     var query = cell.query.split("|")[0];
     app_1.dispatch("addActiveCell", { id: cell.id, cell: cell, query: query }).commit();
+    event.preventDefault();
 }
 function createEmbedPopout(cm, paneId) {
-    console.log("CREATING POPOUT");
     var coords = cm.cursorCoords("head", "page");
     // dispatch("createEmbedPopout", {paneId, x: coords.left, y: coords.top - 20}).commit();
     cm.operation(function () {
         var from = cm.getCursor("from");
         var id = utils_1.uuid();
         cm.replaceRange("=", from, cm.getCursor("to"));
+        if (from.line === 0)
+            return;
         var to = cm.posFromIndex(cm.getCursor("from"));
         var fromIx = cm.indexFromPos(from);
         var toIx = cm.indexFromPos(to);
-        var cell = { id: id, start: fromIx, length: toIx - fromIx, placeholder: true, query: "" };
+        var cell = { id: id, start: fromIx, length: toIx - fromIx, placeholder: true, query: "", paneId: paneId };
         app_1.dispatch("addActiveCell", { id: id, query: "", cell: cell, placeholder: true });
     });
 }
@@ -1374,7 +1401,7 @@ function navigate(event, elem) {
     var paneId = elem.data.paneId;
     var info = { paneId: paneId, value: elem.link, peek: elem.peek };
     if (event.clientX) {
-        info.x = event.clientX;
+        info.x = "calc(50% - 350px)";
         info.y = event.clientY;
     }
     app_1.dispatch("ui set search", info).commit();
@@ -1383,7 +1410,7 @@ function navigate(event, elem) {
 //---------------------------------------------------------
 // Page parsing
 //---------------------------------------------------------
-function getCells(content) {
+function getCells(content, paneId) {
     var cells = [];
     var ix = 0;
     var ids = {};
@@ -1407,7 +1434,10 @@ function getCells(content) {
         ix += part.length;
     }
     for (var active in activeCells) {
-        cells.push(activeCells[active].cell);
+        var cell = activeCells[active].cell;
+        if (cell.placeholder && cell.paneId === paneId) {
+            cells.push(cell);
+        }
     }
     return cells;
 }
@@ -1549,7 +1579,6 @@ function setActiveAttribute(event, elem) {
     }
 }
 function handleAttributesKey(event, elem) {
-    console.log("HERE");
     if (event.keyCode === utils_1.KEYS.ENTER && elem.submit) {
         elem.submit(event, elem);
     }
@@ -1599,14 +1628,12 @@ app_1.handle("remove attribute generating query", function (changes, _a) {
         changes.remove("action mapping constant", { action: action });
     }
     changes.remove("action source", { source: queryId });
-    console.log(changes);
 });
 function submitAttribute(event, elem) {
     var eav = elem.eav, sourceView = elem.sourceView, query = elem.query;
     var chain = app_1.dispatch("clearActiveAttribute", { entity: eav.entity });
     var value = event.currentTarget.value;
     if (query !== undefined && value === query) {
-        console.log("BAILING");
         return chain.commit();
     }
     if (elem.sourceView !== undefined) {
@@ -1675,7 +1702,6 @@ function updateSearch(event, elem) {
     app_1.dispatch("ui update search", elem).commit();
 }
 function toggleSearchPlan(event, elem) {
-    console.log("toggle search plan", elem);
     app_1.dispatch("ui toggle search plan", elem).commit();
 }
 ;
@@ -1952,7 +1978,7 @@ window.addEventListener("popstate", function (evt) {
 // Prevent backspace from going back
 window.addEventListener("keydown", function (event) {
     var current = event.target;
-    if (current.nodeName !== "INPUT" && current.nodeName !== "TEXTAREA" && current.contentEditable !== "true") {
+    if (event.keyCode === utils_1.KEYS.BACKSPACE && current.nodeName !== "INPUT" && current.nodeName !== "TEXTAREA" && current.contentEditable !== "true") {
         event.preventDefault();
     }
 });
