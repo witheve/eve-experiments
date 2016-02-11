@@ -42,7 +42,7 @@ function preventDefault(event) {
 }
 // @NOTE: ids must not contain whitespace
 function asEntity(raw) {
-    var cleaned = raw && raw.trim();
+    var cleaned = raw && ("" + raw).trim();
     if (!cleaned)
         return;
     if (app_1.eve.findOne("entity", { entity: cleaned }))
@@ -156,6 +156,10 @@ app_1.handle("ui toggle search plan", function (changes, _a) {
 app_1.handle("add sourced eav", function (changes, eav) {
     if (!eav.source) {
         eav.source = utils_1.uuid();
+    }
+    var valueId = asEntity(eav.value);
+    if (valueId) {
+        eav.value = valueId;
     }
     changes.add("sourced eav", eav);
 });
@@ -711,9 +715,9 @@ function cellEditor(entityId, paneId, cell) {
     if (text.match(/\$\$.*\$\$/)) {
         text = "";
     }
-    var contentEntityId = asEntity(text);
-    if (contentEntityId) {
-        text = uitk.resolveName(contentEntityId);
+    var _b = (app_1.eve.findOne("display name", { id: text }) || {}).name, name = _b === void 0 ? undefined : _b;
+    if (name) {
+        text = name;
     }
     return { children: [
             { c: "embedded-cell", children: [
@@ -769,7 +773,7 @@ function autocompleterOptions(entityId, paneId, cell) {
     if (contentEntityId) {
         text = uitk.resolveName(contentEntityId);
     }
-    var isEntity = !!contentEntityId;
+    var isEntity = app_1.eve.findOne("display name", { id: contentEntityId });
     var parsed = [];
     if (text !== "") {
         try {
@@ -1048,7 +1052,7 @@ function modifyAutocompleteOptions(isEntity, parsed, text, params, entityId) {
         var generated = app_1.eve.findOne("generated eav", { entity: eav.entity, attribute: eav.attribute, value: eav.value });
         var text_1 = eav.value;
         var sourceView = void 0;
-        var contentEntityId = asEntity(text_1);
+        var display = app_1.eve.findOne("display name", { id: text_1 });
         if (generated) {
             sourceView = generated.source;
             if (sourcesSeen[sourceView])
@@ -1058,8 +1062,8 @@ function modifyAutocompleteOptions(isEntity, parsed, text, params, entityId) {
             option_1.sourceView = sourceView;
             option_1.query = text_1;
         }
-        else if (contentEntityId) {
-            text_1 = "= " + uitk.resolveName(contentEntityId);
+        else if (display) {
+            text_1 = "= " + display.name;
         }
         option_1.children = [
             { c: "attribute-name", text: attribute },
@@ -1669,9 +1673,9 @@ function submitAttribute(event, elem) {
 //---------------------------------------------------------
 function searchInput(paneId, value) {
     var name = value;
-    var entityId = asEntity(value);
-    if (entityId)
-        name = uitk.resolveName(entityId);
+    var display = app_1.eve.findOne("display name", { id: value });
+    if (display)
+        name = display.name;
     var state = exports.uiState.widget.search[paneId] || { focused: false, plan: false };
     return {
         c: "flex-grow wiki-search-wrapper",
