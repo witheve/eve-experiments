@@ -40,6 +40,19 @@ exports.uiState = {
 function preventDefault(event) {
     event.preventDefault();
 }
+// @NOTE: ids must not contain whitespace
+function asEntity(raw) {
+    var cleaned = raw && raw.trim();
+    if (!cleaned)
+        return;
+    if (app_1.eve.findOne("entity", { entity: cleaned }))
+        return cleaned;
+    cleaned = cleaned.toLowerCase();
+    if (app_1.eve.findOne("entity", { entity: cleaned }))
+        return cleaned; // This can be removed if we remove caps from ids. UUIDv4 does not use caps in ids
+    var _a = (app_1.eve.findOne("index name", { name: cleaned }) || {}).id, id = _a === void 0 ? undefined : _a;
+    return id;
+}
 function setURL(paneId, contains, replace) {
     var name = uitk.resolveName(contains);
     if (paneId !== "p1")
@@ -71,9 +84,9 @@ app_1.handle("ui focus search", function (changes, _a) {
 app_1.handle("ui set search", function (changes, _a) {
     var paneId = _a.paneId, value = _a.value, peek = _a.peek, x = _a.x, y = _a.y, popState = _a.popState;
     value = value.trim();
-    var displays = app_1.eve.find("display name", { name: value });
-    if (displays.length === 1)
-        value = displays[0].id;
+    var entity = asEntity(value);
+    if (entity)
+        value = entity;
     var fact;
     if (paneId === "p1") {
         popoutHistory = [];
@@ -201,9 +214,9 @@ app_1.handle("create query", function (changes, _a) {
 });
 app_1.handle("insert query", function (changes, _a) {
     var query = _a.query;
+    query = query.trim().toLowerCase();
     if (app_1.eve.findOne("query to id", { query: query }))
         return;
-    query = query.trim();
     var parsed = NLQueryParser_1.parse(query);
     if (parsed[0].state === NLQueryParser_1.StateFlags.COMPLETE) {
         var artifacts = parser_1.parseDSL(parsed[0].query.toString());
@@ -444,27 +457,28 @@ function loadedPrompt() {
 function pane(paneId) {
     // @FIXME: Add kind to ui panes
     var _a = app_1.eve.findOne("ui pane", { pane: paneId }) || {}, _b = _a.contains, contains = _b === void 0 ? undefined : _b, _c = _a.kind, kind = _c === void 0 ? PANE.FULL : _c;
+    var cleaned = contains && contains.trim().toLowerCase();
     var makeChrome = paneChrome[kind];
     if (!makeChrome)
         throw new Error("Unknown pane kind: '" + kind + "' (" + PANE[kind] + ")");
     var _d = makeChrome(paneId, contains), klass = _d.c, header = _d.header, footer = _d.footer, captureClicks = _d.captureClicks;
     var content;
-    var display = app_1.eve.findOne("display name", { name: contains }) || app_1.eve.findOne("display name", { id: contains });
+    var entityId = asEntity(contains);
     var contentType = "entity";
     if (contains.length === 0) {
         content = entity(utils_1.builtinId("home"), paneId, kind);
     }
-    else if (contains.indexOf("search: ") === 0) {
+    else if (cleaned.indexOf("search: ") === 0) {
         contentType = "search";
-        content = search(contains.substring("search: ".length), paneId);
+        content = search(cleaned.substring("search: ".length), paneId);
     }
-    else if (display) {
+    else if (entityId) {
         var options = {};
-        content = entity(display.id, paneId, kind, options);
+        content = entity(entityId, paneId, kind, options);
     }
-    else if (app_1.eve.findOne("query to id", { query: contains })) {
+    else if (app_1.eve.findOne("query to id", { query: cleaned })) {
         contentType = "search";
-        content = search(contains, paneId);
+        content = search(cleaned, paneId);
     }
     else if (contains !== "") {
         content = { c: "flex-row spaced-row", children: [
@@ -593,19 +607,16 @@ function queryUIInfo(query) {
     // let params = getCellParams(content, rawParams);
     var params = parseParams(rawParams);
     var results;
-    if (app_1.eve.findOne("display name", { id: content }) || app_1.eve.findOne("display name", { name: content })) {
-        var id = content;
-        var display = app_1.eve.findOne("display name", { name: content });
-        if (display) {
-            id = display["id"];
-        }
-        results = { unprojected: [{ entity: id }], results: [{ entity: id }] };
+    var entityId = asEntity(content);
+    if (entityId) {
+        results = { unprojected: [{ entity: entityId }], results: [{ entity: entityId }] };
     }
     else if (urlRegex.exec(content)) {
         results = { unprojected: [{ url: content }], results: [{ url: content }] };
     }
     else {
-        var queryId = app_1.eve.findOne("query to id", { query: content });
+        var cleaned = content && content.trim().toLowerCase();
+        var queryId = app_1.eve.findOne("query to id", { query: cleaned });
         if (queryId) {
             var queryResults = app_1.eve.find(queryId.id);
             var queryUnprojected = app_1.eve.table(queryId.id).unprojected;
@@ -628,10 +639,9 @@ function queryUIInfo(query) {
 }
 function getCellParams(content, rawParams) {
     content = content.trim();
-    var display = app_1.eve.findOne("display name", { name: content });
     var params = parseParams(rawParams);
-    var contentDisplay = app_1.eve.findOne("display name", { id: content }) || app_1.eve.findOne("display name", { name: content });
-    if (contentDisplay) {
+    var entityId = asEntity(content);
+    if (entityId) {
         params["rep"] = params["rep"] || "link";
     }
     else if (urlRegex.exec(content)) {
@@ -701,9 +711,9 @@ function cellEditor(entityId, paneId, cell) {
     if (text.match(/\$\$.*\$\$/)) {
         text = "";
     }
-    var display = app_1.eve.findOne("display name", { id: text });
-    if (display) {
-        text = display["name"];
+    var contentEntityId = asEntity(text);
+    if (contentEntityId) {
+        text = uitk.resolveName(contentEntityId);
     }
     return { children: [
             { c: "embedded-cell", children: [
@@ -755,11 +765,11 @@ function autocompleterOptions(entityId, paneId, cell) {
     }
     catch (e) {
     }
-    var display = app_1.eve.findOne("display name", { id: text });
-    if (display) {
-        text = display["name"];
+    var contentEntityId = asEntity(text);
+    if (contentEntityId) {
+        text = uitk.resolveName(contentEntityId);
     }
-    var isEntity = app_1.eve.findOne("display name", { name: text });
+    var isEntity = !!contentEntityId;
     var parsed = [];
     if (text !== "") {
         try {
@@ -823,7 +833,7 @@ function positionAutocompleter(node, elem) {
     node.style.left = left;
 }
 function queryAutocompleteOptions(isEntity, parsed, text, params, entityId) {
-    var pageName = app_1.eve.findOne("display name", { id: entityId })["name"];
+    var pageName = uitk.resolveName(entityId);
     var options = [];
     var hasValidParse = parsed.some(function (parse) { return parse.state === NLQueryParser_1.StateFlags.COMPLETE; });
     parsed.sort(function (a, b) { return b.score - a.score; });
@@ -866,7 +876,7 @@ function queryAutocompleteOptions(isEntity, parsed, text, params, entityId) {
         options.push({ score: 2, action: setCellState, state: "represent", text: "embed as ..." });
     }
     // set attribute
-    if (text && app_1.eve.findOne("display name", { id: entityId }).name !== text) {
+    if (text && app_1.eve.findOne("index name", { id: entityId }).name !== text.toLowerCase()) {
         if (!isAttribute) {
             options.push({ score: 2.5, action: setCellState, state: "property", text: "add as a property of " + pageName });
         }
@@ -899,7 +909,7 @@ function setCellState(elem, value, doEmbed) {
 }
 function createAutocompleteOptions(isEntity, parsed, text, params, entityId) {
     var options = [];
-    var pageName = app_1.eve.findOne("display name", { id: entityId })["name"];
+    var pageName = uitk.resolveName(entityId);
     var isCollection = isEntity ? app_1.eve.findOne("collection", { collection: isEntity.id }) : false;
     var joiner = "a";
     if (text && text[0].match(/[aeiou]/i)) {
@@ -988,7 +998,7 @@ function definePropertyAndEmbed(elem, value, doEmbed) {
         value = "= " + value;
     }
     var success = handleAttributeDefinition(entityId, defineValue, value);
-    var entityName = app_1.eve.findOne("display name", { id: entityId }).name;
+    var entityName = uitk.resolveName(entityId);
     doEmbed(entityName + "'s " + defineValue + "|rep=CSV;field=" + defineValue);
 }
 function defineAutocompleteOptions(isEntity, parsed, text, params, entityId) {
@@ -1038,7 +1048,7 @@ function modifyAutocompleteOptions(isEntity, parsed, text, params, entityId) {
         var generated = app_1.eve.findOne("generated eav", { entity: eav.entity, attribute: eav.attribute, value: eav.value });
         var text_1 = eav.value;
         var sourceView = void 0;
-        var display = app_1.eve.findOne("display name", { id: text_1 });
+        var contentEntityId = asEntity(text_1);
         if (generated) {
             sourceView = generated.source;
             if (sourcesSeen[sourceView])
@@ -1048,8 +1058,8 @@ function modifyAutocompleteOptions(isEntity, parsed, text, params, entityId) {
             option_1.sourceView = sourceView;
             option_1.query = text_1;
         }
-        else if (display) {
-            text_1 = "= " + display.name;
+        else if (contentEntityId) {
+            text_1 = "= " + uitk.resolveName(contentEntityId);
         }
         option_1.children = [
             { c: "attribute-name", text: attribute },
@@ -1086,9 +1096,9 @@ function interpretAttributeValue(value) {
     if (cleaned[0] === "=") {
         //parse it
         cleaned = cleaned.substring(1).trim();
-        var display = app_1.eve.findOne("display name", { name: cleaned }) || app_1.eve.findOne("display name", { id: cleaned });
-        if (display) {
-            return { isValue: true, value: display.id };
+        var entityId = asEntity(cleaned);
+        if (entityId) {
+            return { isValue: true, value: entityId };
         }
         var parsed = NLQueryParser_1.parse(cleaned);
         return { isValue: false, parse: parsed, value: cleaned };
@@ -1110,7 +1120,8 @@ function handleAttributeDefinition(entity, attribute, search, chain) {
         // add the query
         app_1.dispatch("insert query", { query: queryText }).commit();
         // create another query that projects eavs
-        var queryToId = app_1.eve.findOne("query to id", { query: queryText });
+        var cleaned = queryText && queryText.trim().toLowerCase();
+        var queryToId = app_1.eve.findOne("query to id", { query: cleaned });
         if (!queryToId)
             return false;
         var id = queryToId.id;
@@ -1163,7 +1174,7 @@ function entity(entityId, paneId, kind, options) {
     if (content === undefined)
         return { text: "Could not find the requested page" };
     var page = app_1.eve.findOne("entity page", { entity: entityId })["page"];
-    var name = app_1.eve.findOne("display name", { id: entityId }).name;
+    var name = uitk.resolveName(entityId);
     var cells = getCells(content, paneId);
     var keys = {
         "Backspace": function (cm) { return maybeActivateCell(cm, paneId); },
@@ -1316,7 +1327,7 @@ function createEmbedPopout(cm, paneId) {
         cm.replaceRange("=", from, cm.getCursor("to"));
         if (from.line === 0)
             return;
-        var to = cm.posFromIndex(cm.getCursor("from"));
+        var to = cm.getCursor("from");
         var fromIx = cm.indexFromPos(from);
         var toIx = cm.indexFromPos(to);
         var cell = { id: id, start: fromIx, length: toIx - fromIx, placeholder: true, query: "", paneId: paneId };
@@ -1333,9 +1344,9 @@ function makeDoEmbedFunction(cm, mark, cell, paneId) {
         var _b = value.split("|"), text = _b[0], rawParams = _b[1];
         text = text.trim();
         // @TODO: this doesn't take disambiguations into account
-        var display = app_1.eve.findOne("display name", { name: text });
-        if (display) {
-            text = display.id;
+        var entityId = asEntity(text);
+        if (entityId) {
+            text = entityId;
         }
         var replacement = "{" + text + "|" + (rawParams || "") + "}";
         if (text === "") {
@@ -1657,11 +1668,10 @@ function submitAttribute(event, elem) {
 // Wiki Widgets
 //---------------------------------------------------------
 function searchInput(paneId, value) {
-    var display = app_1.eve.findOne("display name", { id: value });
     var name = value;
-    if (display) {
-        name = display.name;
-    }
+    var entityId = asEntity(value);
+    if (entityId)
+        name = uitk.resolveName(entityId);
     var state = exports.uiState.widget.search[paneId] || { focused: false, plan: false };
     return {
         c: "flex-grow wiki-search-wrapper",
@@ -1831,26 +1841,15 @@ var _prepare = {
             return [];
         // If field isn't in results, try to resolve it as a field name, otherwise error out
         if (results[0][field] === undefined) {
-            var potentialIds = app_1.eve.find("display name", { name: field });
-            var neueField;
-            for (var _i = 0; _i < potentialIds.length; _i++) {
-                var display = potentialIds[_i];
-                if (results[0][display.id] !== undefined) {
-                    if (neueField) {
-                        neueField = undefined;
-                        break;
-                    }
-                    neueField = display.id;
-                }
-            }
+            var neueField = asEntity(field);
             if (!neueField)
                 throw new Error("Unable to uniquely resolve field name " + field + " in result fields " + Object.keys(results[0]));
             else
                 field = neueField;
         }
         var elems = [];
-        for (var _a = 0; _a < results.length; _a++) {
-            var row = results[_a];
+        for (var _i = 0; _i < results.length; _i++) {
+            var row = results[_i];
             elems.push({ text: row[field], data: params.data });
         }
         return elems;
@@ -1863,26 +1862,15 @@ var _prepare = {
             return [];
         // If field isn't in results, try to resolve it as a field name, otherwise error out
         if (results[0][field] === undefined) {
-            var potentialIds = app_1.eve.find("display name", { name: field });
-            var neueField;
-            for (var _i = 0; _i < potentialIds.length; _i++) {
-                var display = potentialIds[_i];
-                if (results[0][display.id] !== undefined) {
-                    if (neueField) {
-                        neueField = undefined;
-                        break;
-                    }
-                    neueField = display.id;
-                }
-            }
+            var neueField = asEntity(field);
             if (!neueField)
                 throw new Error("Unable to uniquely resolve field name " + field + " in result fields " + Object.keys(results[0]));
             else
                 field = neueField;
         }
         var values = [];
-        for (var _a = 0; _a < results.length; _a++) {
-            var row = results[_a];
+        for (var _i = 0; _i < results.length; _i++) {
+            var row = results[_i];
             values.push(row[field]);
         }
         return { values: values, data: params.data };

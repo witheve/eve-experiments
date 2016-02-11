@@ -1042,7 +1042,7 @@ function formTree(tokens) {
         if (allFound !== true) {
             var displayName = ngram.map(function (node) { return node.name; }).join(" ");
             log(displayName);
-            var foundName = app_1.eve.findOne("display name", { name: displayName });
+            var foundName = app_1.eve.findOne("index name", { name: displayName });
             log(foundName);
             // If the display name is in the system, mark all the nodes as found 
             if (foundName !== undefined) {
@@ -1558,7 +1558,7 @@ function findEveEntity(search) {
     var foundEntity;
     var name;
     // Try to find by display name first
-    var display = app_1.eve.findOne("display name", { name: search });
+    var display = app_1.eve.findOne("index name", { name: search });
     if (display !== undefined) {
         foundEntity = app_1.eve.findOne("entity", { entity: display.id });
         name = search;
@@ -1595,7 +1595,7 @@ function findEveCollection(search) {
     var foundCollection;
     var name;
     // Try to find by display name first
-    var display = app_1.eve.findOne("display name", { name: search });
+    var display = app_1.eve.findOne("index name", { name: search });
     if (display !== undefined) {
         foundCollection = app_1.eve.findOne("collection", { collection: display.id });
         name = search;

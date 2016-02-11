@@ -217,6 +217,7 @@ app.init("bootstrap", function bootstrap() {
         .addUnionMember("directionless links", "entity links", { entity: "link", link: "entity" });
     phase.addUnion("collection entities", ["entity", "collection"])
         .addUnionMember("collection entities", "is a attributes");
+    phase.addArtifacts(parser_1.parseDSL("\n    (query :$$view \"bs: index name\"\n      (display-name :id id :name raw)\n      (lowercase :text raw :result name)\n      (project! \"index name\" :id id :name name))\n  "));
     phase.addArtifacts(parser_1.parseDSL("\n    (query :$$view \"bs: entity\"\n      (entity-page :entity entity :page page)\n      (page-content :page page :content content)\n      (project! \"entity\" :entity entity :content content))\n  "));
     phase.addArtifacts(parser_1.parseDSL("\n    (query :$$view \"bs: unmodified added bits\"\n      (added-bits :entity entity :content content)\n      (negate (manual-entity :entity entity))\n      (project! \"unmodified added bits\" :entity entity :content content))\n  "));
     phase.addArtifacts(parser_1.parseDSL("\n    (query :$$view \"bs: is a attributes\"\n      (entity-eavs :attribute \"is a\" :entity entity :value value)\n      (project! \"is a attributes\" :collection value :entity entity))\n  "));
