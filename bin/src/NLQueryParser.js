@@ -45,7 +45,7 @@ function preprocessQueryString(queryString) {
     processedString = processedString.replace(new RegExp("-", 'g'), " - ");
     processedString = processedString.replace(new RegExp("\\*", 'g'), " * ");
     processedString = processedString.replace(new RegExp("/", 'g'), " / ");
-    processedString = processedString.replace(new RegExp("\s\s+", 'g'), " ");
+    processedString = processedString.replace(new RegExp("\\s+", 'g'), " ");
     // Get parts of speach with sentence information. It's okay if they're wrong; they 
     // will be corrected as we create the tree and match against the underlying data model
     var sentences = nlp.pos(processedString, { dont_combine: true }).sentences;

@@ -2,6 +2,7 @@
 var app = require("./app");
 var bootstrap = require("./bootstrap");
 var ui = require("./ui");
+var utils_1 = require("./utils");
 app.renderRoots["wiki"] = ui.root;
 // @HACK: we have to use bootstrap in some way to get it to actually be included and
 // executed
@@ -17,17 +18,31 @@ app.init("wiki", function () {
     document.body.classList.add(localStorage["theme"] || "light");
     app.activeSearches = {};
     initSearches(app.eve);
-    window.history.replaceState({ root: true }, null, window.location.pathname);
+    window.history.replaceState({ root: true }, null, window.location.hash);
     var mainPane = app.eve.findOne("ui pane", { pane: "p1" });
-    var path = window.location.pathname;
-    if (path !== "/") {
-        var _a = path.split("/"), _ = _a[0], kind = _a[1], content = _a[2];
-        content = content.replace(/_/g, " ");
-        app.dispatch("ui set search", { paneId: mainPane.pane, value: content, popState: true }).commit();
-        ui.setURL("p1", content);
+    var path = utils_1.location();
+    var _a = path.split("/"), _ = _a[0], kind = _a[1], _b = _a[2], raw = _b === void 0 ? "" : _b;
+    var content = utils_1.deslugify(raw);
+    var cur = app.dispatch("ui set search", { paneId: mainPane.pane, value: content });
+    if (content && !app.eve.findOne("query to id", { query: content })) {
+        cur.dispatch("insert query", { query: content });
     }
-    else {
-        ui.setURL("p1", mainPane.contains);
+    cur.commit();
+});
+window.addEventListener("hashchange", function () {
+    var mainPane = app.eve.findOne("ui pane", { pane: "p1" });
+    var path = utils_1.location();
+    var _a = path.split("/"), _ = _a[0], kind = _a[1], _b = _a[2], raw = _b === void 0 ? "" : _b;
+    var content = utils_1.deslugify(raw);
+    var displays = app.eve.find("display name", { name: content });
+    if (displays.length === 1)
+        content = displays[0].id;
+    if (mainPane.contains === content)
+        return;
+    var cur = app.dispatch("ui set search", { paneId: mainPane.pane, value: content });
+    if (content && !app.eve.findOne("query to id", { query: content })) {
+        cur.dispatch("insert query", { query: content });
     }
+    cur.commit();
 });
 //# sourceMappingURL=wiki.js.map

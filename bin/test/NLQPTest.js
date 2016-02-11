@@ -7,7 +7,7 @@ var app_1 = require("../src/app");
 // optimizing away unused code
 var boostrapIxer = bootstrap.ixer;
 app.renderRoots["nlqp"];
-nlqp.debug = true;
+nlqp.debug = false;
 function parseTest(queryString, n) {
     var parseResult;
     var avgTime = 0;
@@ -127,8 +127,29 @@ var phrases = [
     // These are queries that we had problems with in the past
     // make sure they always work
     // -------------------------------
-    //"sum of employee salaries",
-    "+ 1 3"
+    "sum of employee salaries",
+    "3 + Corey's age",
+    "Corey's age + 3",
+    "sum pet length",
+    "sum employee salaries",
+    "employee salaries",
+    "salaries in engineering",
+    "salaries per department",
+    "Pet shorter than koala",
+    "Pet not shorter than koalas",
+    "exotic lengths",
+    //"Corey age, height, gender and hair color",
+    //"Corey's wife's age, gender, and height",
+    "employee salaries",
+    "employees with their departments and salaries",
+    "employees with their salaries",
+    "employees and their salaries",
+    "Pets except those longer than a koala",
+    "sum salaries per department",
+    "sum salary per department",
+    "exotic that are not pets",
+    "pets not exotics",
+    "Corey's age + Josh's salary",
 ];
 /*
 let siriphrases = [

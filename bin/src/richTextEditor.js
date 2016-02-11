@@ -159,6 +159,23 @@ var RichTextEditor = (function () {
         var pos = cm.indexFromPos(cursor);
         var marks = cm.findMarksAt(cursor);
     };
+    RichTextEditor.prototype.addMark = function (paneId, cell, from, to, mark) {
+        var cm = this.cmInstance;
+        var cellId = cell.id;
+        var dom;
+        if (!mark) {
+            dom = document.createElement("div");
+            dom.id = paneId + "|" + cellId + "|container";
+        }
+        else {
+            dom = mark.replacedWith;
+            mark.clear();
+        }
+        var newMark = cm.markText(cm.posFromIndex(from), cm.posFromIndex(to), { replacedWith: dom });
+        newMark.cell = cell;
+        dom["mark"] = newMark;
+        this.marks[cellId] = newMark;
+    };
     return RichTextEditor;
 })();
 exports.RichTextEditor = RichTextEditor;
@@ -210,19 +227,7 @@ function createEditor(node, elem) {
                     }
                 }
                 if (add) {
-                    var dom = void 0;
-                    if (!mark) {
-                        dom = document.createElement("div");
-                        dom.id = elem["meta"].paneId + "|" + cell.id + "|container";
-                    }
-                    else {
-                        dom = mark.replacedWith;
-                        mark.clear();
-                    }
-                    var newMark = cm.markText(cm.posFromIndex(cell.start), cm.posFromIndex(cell.start + cell.length), { replacedWith: dom });
-                    newMark.cell = cell;
-                    dom["mark"] = newMark;
-                    editor.marks[cell.id] = newMark;
+                    editor.addMark(elem["meta"].paneId, cell, cell.start, cell.start + cell.length, mark);
                 }
             }
             for (var markId in editor.marks) {

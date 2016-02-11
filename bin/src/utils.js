@@ -64,12 +64,92 @@ function titlecase(name) {
     return name.split(" ").map(capitalize).join(" ");
 }
 exports.titlecase = titlecase;
+var _slugifyReplacements = {
+    "-": "dash",
+    "_": "under",
+    "$": "dollar",
+    "&": "and",
+    "+": "plus",
+    ",": "comma",
+    "/": "slash",
+    ":": "colon",
+    ";": "semicolon",
+    "=": "equals",
+    "?": "question",
+    "@": "at",
+    "<": "lt",
+    ">": "gt",
+    "#": "hash",
+    "%": "percent",
+    "{": "opencurly",
+    "}": "closecurly",
+    "|": "pipe",
+    "\\": "whack",
+    "^": "caret",
+    "~": "tilde",
+    "[": "openbracket",
+    "]": "closebracket",
+    "`": "grave"
+};
+var _deslugifyReplacements = {};
+for (var char in _slugifyReplacements) {
+    _deslugifyReplacements[_slugifyReplacements[char]] = char;
+}
+// Slugify encodes a uri component in a fairly human readable fashion
+function slugify(text) {
+    var url = "";
+    for (var _i = 0; _i < text.length; _i++) {
+        var char = text[_i];
+        var replacement = _slugifyReplacements[char];
+        if (char === " ") {
+            url += "_";
+        }
+        else if (replacement) {
+            url += "-'" + replacement + "-";
+        }
+        else {
+            url += char;
+        }
+    }
+    return encodeURIComponent(url);
+}
+exports.slugify = slugify;
+function deslugify(url) {
+    var text = [];
+    for (var _i = 0, _a = url.split("_"); _i < _a.length; _i++) {
+        var word = _a[_i];
+        if (word.indexOf("-") === -1) {
+            text.push(word);
+            continue;
+        }
+        var replaced = "";
+        var tokens = word.split("-");
+        replaced += tokens.shift();
+        var tail_1 = tokens.pop();
+        for (var _b = 0; _b < tokens.length; _b++) {
+            var token = tokens[_b];
+            var replacement = _deslugifyReplacements[token.slice(1)];
+            if (replacement && token.indexOf("'") === 0) {
+                replaced += replacement;
+            }
+            else {
+                replaced += token;
+            }
+        }
+        replaced += tail_1;
+        text.push(replaced);
+    }
+    return decodeURIComponent(text.join(" "));
+}
+exports.deslugify = deslugify;
 exports.string = {
     unpad: exports.unpad,
     repeat: repeat,
     underline: underline,
     capitalize: capitalize,
-    titlecase: titlecase
+    titlecase: titlecase,
+    slugify: slugify,
+    deslugify: deslugify
 };
 function tail(arr) {
     return arr[arr.length - 1];
@@ -168,4 +248,8 @@ function sortByLookup(lookup) {
     };
 }
 exports.sortByLookup = sortByLookup;
+function location() {
+    return window.location.hash.slice(1);
+}
+exports.location = location;
 //# sourceMappingURL=utils.js.map

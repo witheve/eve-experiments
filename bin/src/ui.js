@@ -46,11 +46,11 @@ function setURL(paneId, contains, replace) {
         return; // @TODO: Make this a constant
     var url;
     if (contains.length === 0)
-        url = "/";
+        url = "#";
     else if (name === contains)
-        url = "/search/" + contains.replace(/ /g, "_");
+        url = "#/search/" + utils_1.slugify(contains);
     else
-        url = "/" + name.replace(/ /g, "_") + "/" + contains.replace(/ /g, "_");
+        url = "#/" + utils_1.slugify(name) + "/" + utils_1.slugify(contains);
     var state = { paneId: paneId, contains: contains };
     window["states"] = window["states"] || [];
     window["states"].push(state);
@@ -160,9 +160,9 @@ app_1.handle("update page", function (changes, _a) {
     if (name !== prevName) {
         changes.remove("display name", { id: entity, name: prevName });
         changes.add("display name", { id: entity, name: name });
-        var parts = window.location.pathname.split("/");
+        var parts = utils_1.location().split("/");
         if (parts.length > 2 && parts[2].replace(/_/gi, " ") === entity) {
-            window.history.replaceState(window.history.state, null, "/" + name.replace(/ /gi, "_") + "/" + entity.replace(/ /gi, "_"));
+            window.history.replaceState(window.history.state, null, "/" + utils_1.slugify(name) + "/" + utils_1.slugify(entity));
         }
     }
 });
@@ -358,7 +358,11 @@ function navigateParent(event, elem) {
 }
 function removePopup(event, elem) {
     if (!event.defaultPrevented) {
-        app_1.dispatch("remove popup", {}).commit();
+        var chain = app_1.dispatch("remove popup", {}).dispatch("clearActiveCells", {});
+        for (var entity_1 in exports.uiState.widget.attributes) {
+            chain.dispatch("clearActiveAttribute", { entity: entity_1 });
+        }
+        chain.commit();
     }
 }
 function loadFromFile(event, elem) {
@@ -397,7 +401,7 @@ function loadPrompt() {
                 ] },
             { t: "p", children: [
                     { t: "span", text: "WARNING: This will overwrite your current database. This is irreversible. You should consider " },
-                    { t: "a", href: "#", text: "saving your DB", prompt: savePrompt, click: openPrompt },
+                    { t: "a", text: "saving your DB", prompt: savePrompt, click: openPrompt },
                     { t: "span", text: " first." }
                 ] },
             { t: "input", type: "file", text: "load from file", change: loadFromFile }
@@ -441,13 +445,13 @@ function pane(paneId) {
     else if (contains !== "") {
         content = { c: "flex-row spaced-row", children: [
                 { t: "span", text: "The page " + contains + " does not exist. Would you like to" },
-                { t: "a", c: "link btn add-btn", text: "create it?", href: "#", name: contains, paneId: paneId, click: createPage }
+                { t: "a", c: "link btn add-btn", text: "create it?", name: contains, paneId: paneId, click: createPage }
             ] };
     }
     if (contentType === "search") {
         var disambiguation = { id: "search-disambiguation", c: "flex-row spaced-row disambiguation", children: [
                 { text: "Did you mean to" },
-                { t: "a", c: "link btn add-btn", text: "create a new page", href: "#", name: contains, paneId: paneId, click: createPage },
+                { t: "a", c: "link btn add-btn", text: "create a new page", name: contains, paneId: paneId, click: createPage },
                 { text: "with this name?" }
             ] };
     }
@@ -470,8 +474,7 @@ function createPage(evt, elem) {
     var entity = utils_1.uuid();
     var page = utils_1.uuid();
     app_1.dispatch("create page", { page: page, content: "# " + name + "\n" })
-        .dispatch("create entity", { entity: entity, page: page, name: name })
-        .dispatch("ui set search", { paneId: elem["paneId"], value: name }).commit();
+        .dispatch("create entity", { entity: entity, page: page, name: name }).commit();
 }
 function deleteEntity(event, elem) {
     var name = uitk.resolveName(elem.entity);
@@ -681,7 +684,7 @@ function cellEditor(entityId, paneId, cell) {
     return { children: [
             { c: "embedded-cell", children: [
                     { c: "adornment", text: "=" },
-                    { t: "span", c: "", contentEditable: true, text: text, input: updateActiveCell, keydown: embeddedCellKeys, cell: cell, selected: selected, paneId: paneId, postRender: autoFocus ? focusCellEditor : undefined },
+                    { t: "span", c: "", contentEditable: true, text: text, click: preventDefault, input: updateActiveCell, keydown: embeddedCellKeys, cell: cell, selected: selected, paneId: paneId, postRender: autoFocus ? focusCellEditor : undefined },
                 ] },
             autocompleter(options, paneId, cell)
         ] };
@@ -704,6 +707,8 @@ function optionKeys(event, elem) {
     }
 }
 function executeAutocompleterOption(event, elem) {
+    if (event.defaultPrevented)
+        return;
     var paneId = elem.paneId, cell = elem.cell;
     var editor = paneEditors[paneId];
     var cm = editor.cmInstance;
@@ -757,6 +762,15 @@ function autocompleterOptions(entityId, paneId, cell) {
     else if (state === "define") {
         options = defineAutocompleteOptions(isEntity, parsed, text, params, entityId);
     }
+    else if (state === "modify") {
+        options = modifyAutocompleteOptions(isEntity, parsed, text, params, entityId);
+    }
+    else if (state === "property") {
+        options = propertyAutocompleteOptions(isEntity, parsed, text, params, entityId);
+    }
+    else if (state === "attributes ui") {
+        options = attributesUIAutocompleteOptions(isEntity, parsed, text, params, entityId);
+    }
     else if (state === "url") {
         options = urlAutocompleteOptions(isEntity, parsed, text, params, entityId);
     }
@@ -768,6 +782,11 @@ function autocompleterOptions(entityId, paneId, cell) {
             selectedIx = options.length + selectedIx;
         selected = options[selectedIx];
         selected.selected = true;
+    }
+    for (var _i = 0; _i < options.length; _i++) {
+        var option = options[_i];
+        option["cell"] = cell;
+        option["paneId"] = paneId;
     }
     return { options: options, selected: selected };
 }
@@ -789,17 +808,20 @@ function queryAutocompleteOptions(isEntity, parsed, text, params, entityId) {
     if (text && text[0].match(/[aeiou]/i)) {
         joiner = "an";
     }
+    var isAttribute = false;
     if (topOption) {
         var totalFound = 0;
         var context_2 = topOption.context;
         for (var item in context_2) {
             totalFound += context_2[item].length;
         }
-        if (totalFound === 2 && context_2.entities.length === 1 && context_2.maybeAttributes.length === 1) {
-            options.push({ score: 4, action: setCellState, state: "define", text: "Add " + text });
+        var isEntAttr = totalFound === 2 && (context_2.entities.length === 1 || context_2.collections.length === 1);
+        if (isEntAttr && context_2.maybeAttributes.length === 1) {
+            options.push({ score: 4, action: setCellState, state: "define", text: "add " + text });
+            isAttribute = true;
         }
-        else if (totalFound === 2 && context_2.entities.length === 1 && context_2.attributes.length === 1) {
-            options.push({ score: 1, action: setCellState, state: "define", text: "Add another " + context_2.attributes[0].displayName });
+        else if (isEntAttr && context_2.attributes.length === 1) {
+            options.push({ score: 2.5, action: setCellState, state: "modify", text: "modify " + text });
         }
     }
     // create
@@ -820,13 +842,18 @@ function queryAutocompleteOptions(isEntity, parsed, text, params, entityId) {
         options.push({ score: 2, action: setCellState, state: "represent", text: "embed as ..." });
     }
     // set attribute
-    if (isEntity && app_1.eve.findOne("display name", { id: entityId }).name !== text) {
-        var isAScore = 2.5;
-        if (app_1.eve.findOne("collection", { collection: isEntity.id })) {
-            isAScore = 3;
+    if (text && app_1.eve.findOne("display name", { id: entityId }).name !== text) {
+        if (!isAttribute) {
+            options.push({ score: 2.5, action: setCellState, state: "property", text: "add as a property of " + pageName });
         }
-        options.push({ score: 2.5, action: addAttributeAndEmbed, replace: "is a", entityId: entityId, value: isEntity.id, attribute: "related to", text: pageName + " is related to " + text });
-        options.push({ score: isAScore, action: addAttributeAndEmbed, replace: "related to", entityId: entityId, value: isEntity.id, attribute: "is a", text: pageName + " is " + joiner + " " + text });
+        if (isEntity) {
+            var isAScore = 2.5;
+            if (app_1.eve.findOne("collection", { collection: isEntity.id })) {
+                isAScore = 3;
+            }
+            options.push({ score: 2.5, action: addAttributeAndEmbed, replace: "is a", entityId: entityId, value: isEntity.id, attribute: "related to", text: pageName + " is related to " + text });
+            options.push({ score: isAScore, action: addAttributeAndEmbed, replace: "related to", entityId: entityId, value: isEntity.id, attribute: "is a", text: pageName + " is " + joiner + " " + text });
+        }
     }
     // url embedding
     if (urlRegex.exec(text)) {
@@ -885,12 +912,11 @@ function representAutocompleteOptions(isEntity, parsed, text, params, entityId) 
         options.push({ score: 1, text: "a link", action: embedAs, rep: "link", params: params });
     }
     if (isCollection) {
-        options.push({ score: 1, text: "an index", action: embedAs, rep: "index", params: params });
+        options.push({ score: 1, text: "a list", action: embedAs, rep: "index", params: params });
         options.push({ score: 1, text: "a directory", action: embedAs, rep: "directory", params: params });
     }
     if (isEntity) {
         options.push({ score: 1, text: "a list of related pages", action: embedAs, rep: "related", params: params });
-        options.push({ score: 1, text: "a properties table", action: embedAs, rep: "attributes", params: params });
     }
     return options;
 }
@@ -919,6 +945,29 @@ function embedAs(elem, value, doEmbed) {
     }
     doEmbed(text + "|" + rawParams);
 }
+function propertyAutocompleteOptions(isEntity, parsed, text, params, entityId) {
+    var options = [];
+    var topParse = parsed[0];
+    var asQuery = topParse && topParse.state === NLQueryParser_1.StateFlags.COMPLETE;
+    var option = { score: 1, action: definePropertyAndEmbed, entityId: entityId, asQuery: asQuery };
+    option.children = [
+        { c: "attribute-name", text: "property" },
+        { c: "inline-cell", contentEditable: true, selected: option, keydown: defineKeys, postRender: utils_1.autoFocus }
+    ];
+    options.push(option);
+    return options;
+}
+function definePropertyAndEmbed(elem, value, doEmbed) {
+    var selected = elem.selected;
+    var entityId = selected.entityId, asQuery = selected.asQuery, defineValue = selected.defineValue;
+    if (asQuery) {
+        value = "= " + value;
+    }
+    var success = handleAttributeDefinition(entityId, defineValue, value);
+    console.log("SUCCESS", success);
+    var entityName = app_1.eve.findOne("display name", { id: entityId }).name;
+    doEmbed(entityName + "'s " + defineValue + "|rep=CSV;field=" + defineValue);
+}
 function defineAutocompleteOptions(isEntity, parsed, text, params, entityId) {
     var options = [];
     var topParse = parsed[0];
@@ -930,14 +979,84 @@ function defineAutocompleteOptions(isEntity, parsed, text, params, entityId) {
     else {
         attribute = context.attributes[0].displayName;
     }
-    var entity = context.entities[0].id;
+    var subject = context.entities[0] || context.collections[0];
+    var entity = subject.id;
     var option = { score: 1, action: defineAndEmbed, attribute: attribute, entity: entity };
     option.children = [
-        { text: attribute },
+        { c: "attribute-name", text: attribute },
         { c: "inline-cell", contentEditable: true, selected: option, keydown: defineKeys, postRender: utils_1.autoFocus }
     ];
     options.push(option);
     return options;
+}
+function focusSelected(node, elem) {
+    if (elem.selected.selected && node !== document.activeElement) {
+        node.focus();
+        utils_1.setEndOfContentEditable(node);
+    }
+}
+function selectOptionIx(event, elem) {
+    event.preventDefault();
+    app_1.dispatch("moveCellAutocomplete", { cell: elem.selected.cell, value: elem.optionIx }).commit();
+}
+function modifyAutocompleteOptions(isEntity, parsed, text, params, entityId) {
+    var options = [];
+    var topParse = parsed[0];
+    var context = topParse.context;
+    var attribute = context.attributes[0].displayName;
+    var subject = context.entities[0] || context.collections[0];
+    var entity = subject.id;
+    var eavs = app_1.eve.find("entity eavs", { entity: entity, attribute: attribute });
+    var ix = 0;
+    var sourcesSeen = {};
+    for (var _i = 0; _i < eavs.length; _i++) {
+        var eav = eavs[_i];
+        var option_1 = { score: 1, action: modifyAndEmbed, eav: eav, params: params };
+        var generated = app_1.eve.findOne("generated eav", { entity: eav.entity, attribute: eav.attribute, value: eav.value });
+        var text_1 = eav.value;
+        var sourceView = void 0;
+        var display = app_1.eve.findOne("display name", { id: text_1 });
+        if (generated) {
+            sourceView = generated.source;
+            if (sourcesSeen[sourceView])
+                continue;
+            sourcesSeen[sourceView] = true;
+            text_1 = "= " + app_1.eve.findOne("query to id", { id: sourceView }).query;
+            option_1.sourceView = sourceView;
+            option_1.query = text_1;
+        }
+        else if (display) {
+            text_1 = "= " + display.name;
+        }
+        option_1.children = [
+            { c: "attribute-name", text: attribute },
+            { c: "inline-cell", contentEditable: true, text: text_1, optionIx: ix, click: selectOptionIx, selected: option_1, keydown: defineKeys, postRender: focusSelected }
+        ];
+        options.push(option_1);
+        ix++;
+    }
+    var option = { score: 1, action: defineAndEmbed, attribute: attribute, entity: entity };
+    option.children = [
+        { c: "attribute-name", text: attribute },
+        { c: "inline-cell", contentEditable: true, selected: option, keydown: defineKeys, postRender: focusSelected }
+    ];
+    options.push(option);
+    return options;
+}
+function modifyAndEmbed(elem, text, doEmbed) {
+    var _a = elem.selected, eav = _a.eav, defineValue = _a.defineValue, params = _a.params, sourceView = _a.sourceView, query = _a.query;
+    var success = submitAttribute({ currentTarget: { value: defineValue } }, { eav: eav, sourceView: sourceView, query: query });
+    if (!success) {
+        console.log("I don't know what to do");
+    }
+    // if you didn't remove all the attributes, just re-embed what was there
+    if (app_1.eve.findOne("entity eavs", { entity: eav.entity, attribute: eav.attribute })) {
+        doEmbed(text + "|" + stringifyParams(params));
+    }
+    else {
+        // otherwise there's no point in embedding an error cell
+        doEmbed("");
+    }
 }
 function interpretAttributeValue(value) {
     var cleaned = value.trim();
@@ -961,6 +1080,7 @@ function handleAttributeDefinition(entity, attribute, search, chain) {
     }
     var _a = interpretAttributeValue(search), isValue = _a.isValue, value = _a.value, parse = _a.parse;
     if (isValue) {
+        console.log("ADDED SOURCED EAV", entity, attribute, value);
         chain.dispatch("add sourced eav", { entity: entity, attribute: attribute, value: value }).commit();
     }
     else {
@@ -968,7 +1088,10 @@ function handleAttributeDefinition(entity, attribute, search, chain) {
         // add the query
         app_1.dispatch("insert query", { query: queryText }).commit();
         // create another query that projects eavs
-        var id = app_1.eve.findOne("query to id", { query: queryText }).id;
+        var queryToId = app_1.eve.findOne("query to id", { query: queryText });
+        if (!queryToId)
+            return false;
+        var id = queryToId.id;
         var params = getCellParams(queryText, "");
         if (!params["field"]) {
             return false;
@@ -994,9 +1117,22 @@ function defineAndEmbed(elem, text, doEmbed) {
     }
 }
 function defineKeys(event, elem) {
+    var cell = elem.selected.cell;
     if (event.keyCode === utils_1.KEYS.ENTER) {
         elem.selected.defineValue = event.currentTarget.textContent;
         event.preventDefault();
+    }
+    else if (event.keyCode === utils_1.KEYS.UP) {
+        app_1.dispatch("moveCellAutocomplete", { cell: cell, direction: -1 }).commit();
+    }
+    else if (event.keyCode === utils_1.KEYS.DOWN) {
+        app_1.dispatch("moveCellAutocomplete", { cell: cell, direction: 1 }).commit();
+    }
+    else if (event.keyCode === utils_1.KEYS.ESC) {
+        app_1.dispatch("clearActiveCells").commit();
+        if (elem.selected.paneId) {
+            paneEditors[elem.selected.paneId].cmInstance.focus();
+        }
     }
 }
 function entity(entityId, paneId, kind, options) {
@@ -1100,7 +1236,13 @@ function maybeNavigate(cm, paneId) {
     }
 }
 var activeCells = {};
+app_1.handle("clearActiveCells", function (changes, info) {
+    for (var cell in activeCells) {
+        changes.dispatch("removeActiveCell", activeCells[cell]);
+    }
+});
 app_1.handle("addActiveCell", function (changes, info) {
+    changes.dispatch("clearActiveCells", {});
     var id = info.id;
     info.selected = 0;
     activeCells[id] = info;
@@ -1122,8 +1264,13 @@ app_1.handle("updateActiveCell", function (changes, info) {
 });
 app_1.handle("moveCellAutocomplete", function (changes, info) {
     var active = activeCells[info.cell.id];
-    var direction = info.direction;
-    active.selected += direction;
+    var direction = info.direction, value = info.value;
+    if (value === undefined) {
+        active.selected += direction;
+    }
+    else {
+        active.selected = value;
+    }
 });
 function updateActiveCell(event, elem) {
     var cell = elem.cell;
@@ -1141,9 +1288,12 @@ function createEmbedPopout(cm, paneId) {
     cm.operation(function () {
         var from = cm.getCursor("from");
         var id = utils_1.uuid();
-        var range = "{$$" + id + "$$}";
-        cm.replaceRange(range, from, cm.getCursor("to"));
-        app_1.dispatch("addActiveCell", { id: range, query: "", placeholder: true });
+        cm.replaceRange("=", from, cm.getCursor("to"));
+        var to = cm.posFromIndex(cm.getCursor("from"));
+        var fromIx = cm.indexFromPos(from);
+        var toIx = cm.indexFromPos(to);
+        var cell = { id: id, start: fromIx, length: toIx - fromIx, placeholder: true, query: "" };
+        app_1.dispatch("addActiveCell", { id: id, query: "", cell: cell, placeholder: true });
     });
 }
 function makeDoEmbedFunction(cm, mark, cell, paneId) {
@@ -1161,11 +1311,18 @@ function makeDoEmbedFunction(cm, mark, cell, paneId) {
             text = display.id;
         }
         var replacement = "{" + text + "|" + (rawParams || "") + "}";
+        if (text === "") {
+            replacement = "";
+        }
         if (cm.getRange(from, to) !== replacement) {
             cm.replaceRange(replacement, from, to);
         }
         paneEditors[paneId].cmInstance.focus();
-        app_1.dispatch("insert query", { query: text }).dispatch("removeActiveCell", cell).commit();
+        var chain = app_1.dispatch("removeActiveCell", cell);
+        if (replacement) {
+            chain.dispatch("insert query", { query: text });
+        }
+        chain.commit();
     };
 }
 function embeddedCellKeys(event, elem) {
@@ -1183,8 +1340,8 @@ function embeddedCellKeys(event, elem) {
         event.preventDefault();
     }
     else if (event.keyCode === utils_1.KEYS.ESC || (event.keyCode === utils_1.KEYS.ENTER && value.trim() === "")) {
-        if (cell.placeholder || (cell.cell && cell.cell.placeholder)) {
-            var _b = mark.find(), from = _b.from, to = _b.to;
+        var _b = mark.find(), from = _b.from, to = _b.to;
+        if (cell.placeholder) {
             cm.replaceRange("= ", from, to);
         }
         paneEditors[paneId].cmInstance.focus();
@@ -1249,6 +1406,9 @@ function getCells(content) {
         }
         ix += part.length;
     }
+    for (var active in activeCells) {
+        cells.push(activeCells[active].cell);
+    }
     return cells;
 }
 //---------------------------------------------------------
@@ -1268,8 +1428,8 @@ function attributesUI(entityId, paneId) {
     var items = [];
     for (var _i = 0; _i < eavs.length; _i++) {
         var eav = eavs[_i];
-        var entity_1 = eav.entity, attribute = eav.attribute, value = eav.value;
-        var found = app_1.eve.findOne("generated eav", { entity: entity_1, attribute: attribute, value: value });
+        var entity_2 = eav.entity, attribute = eav.attribute, value = eav.value;
+        var found = app_1.eve.findOne("generated eav", { entity: entity_2, attribute: attribute, value: value });
         var item = { eav: eav, isManual: !found };
         if (found) {
             item.sourceView = found.source;
@@ -1322,6 +1482,7 @@ function attributesUI(entityId, paneId) {
                 if (!state.active || state.active.__id !== subItem.eav.__id) {
                     child.children.push({ c: "link", text: display.name, data: { paneId: paneId }, link: display.id, click: navigate, peek: true });
                     child.click = setActiveAttribute;
+                    valueUI.t = "div";
                 }
                 else {
                     valueUI.value = "= " + display.name;
@@ -1335,20 +1496,30 @@ function attributesUI(entityId, paneId) {
             if (valueUI.t === "input") {
                 valueUI.keydown = handleAttributesKey;
             }
+            else {
+                child.children.push({ c: "spacer no-mouse" });
+            }
+            child.children.push({ c: "ion-android-close remove", eav: subItem.eav, sourceView: subItem.sourceView, query: valueUI["query"], click: removeSubItem });
             group.children.push(child);
             ix++;
             subItem = items[ix];
         }
         tableChildren.push({ id: entityId + "|" + paneId + "|" + item.eav.attribute, c: "attribute", children: [
-                { text: item.eav.attribute },
+                { c: "attribute-name", text: item.eav.attribute },
                 group,
             ] });
     }
-    tableChildren.push({ c: "attribute adder", children: [
-            { t: "input", c: "", placeholder: "property", keydown: handleAttributesKey, input: setAdder, submit: submitAdder, field: "adderAttribute", entityId: entityId, value: state.adderAttribute },
+    tableChildren.push({ id: entityId + "|" + paneId + "|adder", c: "attribute adder", children: [
+            { t: "input", c: "attribute-name value", placeholder: "property", keydown: handleAttributesKey, input: setAdder, submit: submitAdder, field: "adderAttribute", entityId: entityId, value: state.adderAttribute },
             { t: "input", c: "value", placeholder: "value", keydown: handleAttributesKey, input: setAdder, submit: submitAdder, field: "adderValue", entityId: entityId, value: state.adderValue },
         ] });
     return { c: "attributes", children: tableChildren };
+}
+function attributesUIAutocompleteOptions(isEntity, parsed, text, params, entityId) {
+    var options = [];
+    //there are two possible things either we're creating a page
+    // or we need to pick what field of the result we want
+    return options;
 }
 app_1.handle("setActiveAttribute", function (changes, _a) {
     var eav = _a.eav, sourceView = _a.sourceView;
@@ -1367,14 +1538,19 @@ app_1.handle("clearActiveAttribute", function (changes, _a) {
         cur.sourceView = false;
     }
 });
+function removeSubItem(event, elem) {
+    event.preventDefault();
+    submitAttribute(event, elem);
+}
 function setActiveAttribute(event, elem) {
     if (!event.defaultPrevented) {
         app_1.dispatch("setActiveAttribute", { eav: elem.eav, sourceView: elem.sourceView }).commit();
+        event.preventDefault();
     }
 }
 function handleAttributesKey(event, elem) {
     console.log("HERE");
-    if ((event.keyCode === utils_1.KEYS.ENTER || (event.keyCode === utils_1.KEYS.BACKSPACE && event.currentTarget.value === "")) && elem.submit) {
+    if (event.keyCode === utils_1.KEYS.ENTER && elem.submit) {
         elem.submit(event, elem);
     }
     else if (event.keyCode === utils_1.KEYS.ESC) {
@@ -1399,11 +1575,15 @@ function submitAdder(event, elem) {
     if (!state)
         return;
     var adderAttribute = state.adderAttribute, adderValue = state.adderValue;
+    var success = false;
     if (adderAttribute && adderValue) {
         var chain = app_1.dispatch("setAttributeAdder", { entityId: entityId, field: "adderAttribute", value: "" })
             .dispatch("setAttributeAdder", { entityId: entityId, field: "adderValue", value: "" });
-        handleAttributeDefinition(entityId, adderAttribute, adderValue, chain);
+        success = handleAttributeDefinition(entityId, adderAttribute, adderValue, chain);
     }
+    //make sure the focus ends up back in the property input
+    event.currentTarget.parentNode.firstChild.focus();
+    return success;
 }
 app_1.handle("remove attribute generating query", function (changes, _a) {
     var eav = _a.eav, view = _a.view;
@@ -1425,7 +1605,7 @@ function submitAttribute(event, elem) {
     var eav = elem.eav, sourceView = elem.sourceView, query = elem.query;
     var chain = app_1.dispatch("clearActiveAttribute", { entity: eav.entity });
     var value = event.currentTarget.value;
-    if (value === query) {
+    if (query !== undefined && value === query) {
         console.log("BAILING");
         return chain.commit();
     }
@@ -1439,8 +1619,8 @@ function submitAttribute(event, elem) {
         fact.__id = undefined;
         chain.dispatch("remove entity attribute", fact);
     }
-    if (value !== "") {
-        handleAttributeDefinition(eav.entity, eav.attribute, value, chain);
+    if (value !== undefined && value !== "") {
+        return handleAttributeDefinition(eav.entity, eav.attribute, value, chain);
     }
     else {
         chain.commit();
@@ -1484,9 +1664,12 @@ function focusSearch(event, elem) {
 }
 function setSearch(event, elem) {
     var value = event.value;
-    app_1.dispatch("insert query", { query: value })
-        .dispatch("ui set search", { paneId: elem.paneId, value: event.value })
-        .commit();
+    var pane = app_1.eve.findOne("ui pane", { pane: elem.paneId });
+    if (!pane || pane.contains !== event.value) {
+        app_1.dispatch("insert query", { query: value })
+            .dispatch("ui set search", { paneId: elem.paneId, value: event.value })
+            .commit();
+    }
 }
 function updateSearch(event, elem) {
     app_1.dispatch("ui update search", elem).commit();
@@ -1581,9 +1764,9 @@ function prepareEntity(results, params) {
     var entities = getEntitiesFromResults(results, { fields: params.field ? [params.field] : undefined });
     var elems = [];
     for (var _i = 0; _i < entities.length; _i++) {
-        var entity_2 = entities[_i];
+        var entity_3 = entities[_i];
         var elem_1 = utils_1.copy(params);
-        elem_1.entity = entity_2;
+        elem_1.entity = entity_3;
         elems.push(elem_1);
     }
     if (elems.length === 1)
@@ -1746,7 +1929,7 @@ function represent(search, rep, results, params) {
     }
 }
 var historyState = window.history.state;
-var historyURL = window.location.pathname;
+var historyURL = utils_1.location();
 window.addEventListener("popstate", function (evt) {
     var popout = app_1.eve.findOne("ui pane", { kind: PANE.POPOUT });
     if (popout && popoutHistory.length) {
@@ -1760,11 +1943,18 @@ window.addEventListener("popstate", function (evt) {
         return;
     }
     historyState = evt.state;
-    historyURL = window.location.pathname;
+    historyURL = utils_1.location();
     var _a = evt.state || {}, _b = _a.paneId, paneId = _b === void 0 ? undefined : _b, _c = _a.contains, contains = _c === void 0 ? undefined : _c;
     if (paneId === undefined || contains === undefined)
         return;
     app_1.dispatch("ui set search", { paneId: paneId, value: contains, popState: true }).commit();
+});
+// Prevent backspace from going back
+window.addEventListener("keydown", function (event) {
+    var current = event.target;
+    if (current.nodeName !== "INPUT" && current.nodeName !== "TEXTAREA" && current.contentEditable !== "true") {
+        event.preventDefault();
+    }
 });
 // @NOTE: Uncomment this to enable the new UI, or type `window["NEUE_UI"] = true; app.render()` into the console to enable it transiently.
 window["NEUE_UI"] = true;
