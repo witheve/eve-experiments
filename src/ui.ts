@@ -73,6 +73,7 @@ appHandle("ui focus search", (changes:Diff, {paneId, value}:{paneId:string, valu
   state.focused = true;
 });
 appHandle("ui set search", (changes:Diff, {paneId, value, peek, x, y, popState}:{paneId:string, value:string, peek: boolean, x?: number, y?: number, popState?: boolean}) => {
+  value = value.trim();
   let displays = eve.find("display name", {name: value});
   if(displays.length === 1) value = displays[0].id;
   let fact;
@@ -196,6 +197,7 @@ appHandle("create query", (changes:Diff, {id, content}) => {
 
 appHandle("insert query", (changes:Diff, {query}) => {
   if(eve.findOne("query to id", {query})) return;
+  query = query.trim();
   let parsed = nlparse(query);
   if(parsed[0].state === StateFlags.COMPLETE) {
     let artifacts = parseDSL(parsed[0].query.toString());
@@ -282,10 +284,9 @@ export function root():Element {
     panes.push(pane(paneId));
   }
   if(uiState.prompt.open && uiState.prompt.prompt && !uiState.prompt.paneId) {
-    panes.push(
-      {style: "position: absolute; top: 0; left: 0; bottom: 0; right: 0; z-index: 10; background: rgba(0, 0, 0, 0.0);", click: closePrompt},
+    panes.push({c: "shade", click: closePrompt, children: [
       uiState.prompt.prompt()
-    );
+    ]});
   }
   return {c: "wiki-root", id: "root", children: panes, click: removePopup};
 }
@@ -329,7 +330,9 @@ function openPrompt(event, elem) {
   dispatch("toggle prompt", {prompt: elem.prompt, paneId: elem.paneId, open: true}).commit();
 }
 function closePrompt(event, elem) {
-  dispatch("toggle prompt", {open: false}).commit();
+  if(event.target === event.currentTarget) {
+    dispatch("toggle prompt", {open: false}).commit();
+  }
 }
 
 function navigateParent(event, elem) {
@@ -361,6 +364,28 @@ function loadFromFile(event:Event, elem) {
   };
   reader.readAsText(file);
 }
+
+function deleteDatabasePrompt():Element {
+  return {c: "modal-prompt delete-prompt", children: [
+    {t: "header", c: "flex-row", children: [
+      {t: "h2", text: "DELETE DATABASE"},
+      {c: "flex-grow"},
+      {c: "controls", children: [{c: "ion-close-round", click: closePrompt}]}
+    ]},
+    {c: "info", text: "This will remove all information currently stored in Eve for you and cannot be undone."},
+    {c: "flex-row", children: [
+      {t: "button", c: "delete-btn", text: "DELETE EVERYTHING FOREVER", click: nukeDatabase},
+      {c: "flex-grow"},
+      {t: "button", text: "Cancel", click: closePrompt},
+    ]}
+  ]};
+}
+
+function nukeDatabase() {
+  localStorage.clear();
+  window.location.reload();
+}
+
 
 function savePrompt():Element {
   let serialized = localStorage[eveLocalStorageKey];
@@ -442,7 +467,7 @@ export function pane(paneId:string):Element {
   let pane:Element = {c: `wiki-pane ${klass || ""}`, paneId, children: [header, disambiguation, content, footer]};
   let pos = eve.findOne("ui pane position", {pane: paneId});
   if(pos) {
-    pane.style = `left: ${pos.x}px; top: ${pos.y + 20}px;`;
+    pane.style = `left: ${isNaN(pos.x) ? pos.x : pos.x + "px"}; top: ${isNaN(pos.y) ? pos.y : (pos.y + 20) + "px"};`;
   }
   if(captureClicks) {
     pane.click = preventDefault;
@@ -477,7 +502,8 @@ function paneSettings(paneId:string) {
   return {t: "ul", c: "settings", children: [
     {t: "li", c: "save-btn", text: "save", prompt: savePrompt, click: openPrompt},
     {t: "li", c: "load-btn", text: "load", prompt: loadPrompt, click: openPrompt},
-    entity && !isSystem ? {t: "li", c: "delete-btn", text: "delete page", entity, paneId, click: deleteEntity} : undefined
+    entity && !isSystem ? {t: "li", c: "delete-btn", text: "delete page", entity, paneId, click: deleteEntity} : undefined,
+    {t: "li", c: "delete-btn", text: "DELETE DATABASE", prompt: deleteDatabasePrompt, click: openPrompt},
   ]};
 }
 
@@ -1122,7 +1148,7 @@ export function entity(entityId:string, paneId:string, kind: PANE, options:any =
   if(content === undefined) return {text: "Could not find the requested page"};
   let page = eve.findOne("entity page", {entity: entityId})["page"];
   let {name} = eve.findOne("display name", {id: entityId});
-  let cells = getCells(content);
+  let cells = getCells(content, paneId);
   let keys = {
     "Backspace": (cm) => maybeActivateCell(cm, paneId),
     "Cmd-Enter": (cm) => maybeNavigate(cm, paneId),
@@ -1184,6 +1210,8 @@ function maybeActivateCell(cm, paneId) {
     if(cell) {
       let query = cell.query.split("|")[0];
       dispatch("addActiveCell", {id: cell.id, cell, query}).commit();
+      return;
+    } else if(pos.line === 1 && pos.ch === 0) {
       return;
     }
   }
@@ -1266,20 +1294,21 @@ function activateCell(event, elem) {
   let {cell} = elem;
   let query = cell.query.split("|")[0];
   dispatch("addActiveCell", {id: cell.id, cell, query}).commit();
+  event.preventDefault();
 }
 
 function createEmbedPopout(cm, paneId) {
-  console.log("CREATING POPOUT");
   let coords = cm.cursorCoords("head", "page");
   // dispatch("createEmbedPopout", {paneId, x: coords.left, y: coords.top - 20}).commit();
   cm.operation(() => {
     let from = cm.getCursor("from");
     let id = uuid();
     cm.replaceRange("=", from, cm.getCursor("to"));
+    if(from.line === 0) return;
     let to = cm.posFromIndex(cm.getCursor("from"));
     let fromIx = cm.indexFromPos(from);
     let toIx = cm.indexFromPos(to);
-    let cell = {id, start: fromIx, length: toIx - fromIx, placeholder: true, query: ""};
+    let cell = {id, start: fromIx, length: toIx - fromIx, placeholder: true, query: "", paneId};
     dispatch("addActiveCell", {id, query: "", cell, placeholder: true});
   });
 }
@@ -1361,7 +1390,7 @@ function navigate(event, elem) {
   let {paneId} = elem.data;
   let info:any = {paneId, value: elem.link, peek: elem.peek};
   if(event.clientX) {
-    info.x = event.clientX;
+    info.x = "calc(50% - 350px)"; 
     info.y = event.clientY;
   }
   dispatch("ui set search", info).commit();
@@ -1372,7 +1401,7 @@ function navigate(event, elem) {
 // Page parsing
 //---------------------------------------------------------
 
-function getCells(content: string) {
+function getCells(content: string, paneId) {
   let cells = [];
   let ix = 0;
   let ids = {};
@@ -1394,7 +1423,10 @@ function getCells(content: string) {
     ix += part.length;
   }
   for(let active in activeCells) {
-    cells.push(activeCells[active].cell);
+    let cell = activeCells[active].cell;
+    if(cell.placeholder && cell.paneId === paneId) {
+      cells.push(cell);
+    }
   }
   return cells;
 }
@@ -1918,7 +1950,7 @@ window.addEventListener("popstate", function(evt) {
 // Prevent backspace from going back
 window.addEventListener("keydown", (event) => {
   var current = <HTMLElement>event.target;
-  if(current.nodeName !== "INPUT" && current.nodeName !== "TEXTAREA" && current.contentEditable !== "true") {
+  if(event.keyCode === KEYS.BACKSPACE && current.nodeName !== "INPUT" && current.nodeName !== "TEXTAREA" && current.contentEditable !== "true") {
     event.preventDefault();
   }
 })
