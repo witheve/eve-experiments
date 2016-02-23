@@ -532,7 +532,7 @@ export function root():Element {
   if(!localStorage["hideBanner"]) {
     panes.unshift({id: "feedback-banner", c: "banner", children: [
       {c: "content", children: [
-        {text: "This is a preview release of Eve meant for "},
+        {text: "This is an early release of Eve meant for "},
         {t: "a", c: "link", href: "https://groups.google.com/forum/#!forum/eve-talk", text: "feedback"},
         {text: ". We're shooting for quality over quantity, so please don't post this to HN, Reddit, etc, but feel free to share it with friends."},
       ]},
@@ -1777,9 +1777,10 @@ function tile(elem) {
     klass += " active";
   }
   elem.c = klass;
+  elem.click = activateTile;
   elem.children = [
     {c: "tile-content-wrapper", children: elem.children},
-    {c: "edit ion-edit", click: activateTile, cardId, tileId, entityId, source},
+    // {c: "edit ion-edit", click: activateTile, cardId, tileId, entityId, source},
     {c: "controls", children: [
       !elem.removeOnly ? {c: "ion-checkmark submit", click: submitActiveTile, cardId, attribute, entityId, source, reverseEntityAndValue} : undefined,
       !elem.submitOnly ? {c: "ion-backspace cancel", click: removeActiveTile, cardId, attribute, entityId, source} : undefined,
