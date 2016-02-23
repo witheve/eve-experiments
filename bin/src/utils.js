@@ -160,7 +160,9 @@ exports.array = {
 };
 function coerceInput(input) {
     // http://jsperf.com/regex-vs-plus-coercion
-    if (!isNaN(+input))
+    if (typeof input === "object")
+        return input;
+    else if (!isNaN(+input))
         return +input;
     else if (input === "true")
         return true;
@@ -230,21 +232,27 @@ function shuffle(o, rand) {
     return o;
 }
 exports.shuffle = shuffle;
-function sortByField(field) {
+function sortByField(field, direction) {
+    if (direction === void 0) { direction = 1; }
+    var back = -1 * direction;
+    var fwd = direction;
     return function (a, b) {
         return (a[field] === b[field]) ? 0 :
-            (a[field] > b[field]) ? -1 :
-                (a[field] < b[field]) ? 1 :
-                    (a[field] === undefined) ? 1 : -1;
+            (a[field] > b[field]) ? back :
+                (a[field] < b[field]) ? fwd :
+                    (a[field] === undefined) ? fwd : back;
     };
 }
 exports.sortByField = sortByField;
-function sortByLookup(lookup) {
+function sortByLookup(lookup, direction) {
+    if (direction === void 0) { direction = 1; }
+    var back = -1 * direction;
+    var fwd = direction;
     return function (a, b) {
         return (lookup[a] === lookup[b]) ? 0 :
-            (lookup[a] > lookup[b]) ? -1 :
-                (lookup[a] < lookup[b]) ? 1 :
-                    (lookup[a] === undefined) ? 1 : -1;
+            (lookup[a] > lookup[b]) ? back :
+                (lookup[a] < lookup[b]) ? fwd :
+                    (lookup[a] === undefined) ? fwd : back;
     };
 }
 exports.sortByLookup = sortByLookup;

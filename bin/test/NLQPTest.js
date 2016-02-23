@@ -13,8 +13,6 @@ function parseTest(queryString, n) {
     var avgTime = 0;
     var maxTime = 0;
     var minTime;
-    var preTags = nlqp.preprocessQueryString(queryString);
-    var pretagsToString = preTags.map(function (pt) { return ("(" + pt.text + "|" + pt.tag + ")"); }).join("");
     // Parse string and measure how long it takes
     for (var i = 0; i < n; i++) {
         var start = performance.now();
@@ -34,9 +32,9 @@ function parseTest(queryString, n) {
     // Display result
     var tokenStrings = nlqp.tokenArrayToString(parseResult.tokens);
     var timingDisplay = "Timing (avg, max, min): " + (avgTime / n).toFixed(2) + " | " + maxTime.toFixed(2) + " | " + minTime.toFixed(2) + " ";
+    console.log(parseResult);
     console.log(queryString);
-    console.log(pretagsToString);
-    console.log("State: " + nlqp.StateFlags[parseResult.state]);
+    console.log("State: " + nlqp.Intents[parseResult.intent]);
     console.log(parseResult.context);
     console.log("-------------------------------------------------------------------------------------------");
     console.log("Tokens");
@@ -49,17 +47,17 @@ function parseTest(queryString, n) {
     console.log("-------------------------------------------------------------------------------------------");
     console.log("Result");
     console.log(queryString);
+    console.log(parseResult.query.toString());
     console.log(executeQuery(parseResult.query).join("\n"));
     console.log("-------------------------------------------------------------------------------------------");
     console.log(timingDisplay);
     console.log("===========================================================================================");
-    return parseResult.state;
+    return parseResult.intent;
 }
 function executeQuery(query) {
     var resultsString = [];
     if (query.projects.length !== 0) {
         var queryString = query.toString();
-        console.log(queryString);
         var artifacts = dslparser.parseDSL(queryString);
         var changeset = app_1.eve.diff();
         var results = [];
@@ -126,8 +124,14 @@ var phrases = [
     // -------------------------------
     // These are queries that we had problems with in the past
     // make sure they always work
+    // -------------------------------//
+    //"employees, salaries per department",
+    /*
+    "Corey's salary, department, and age",
+    "Corey's wife's age, gender, and height",
+    */
     // -------------------------------
-    "Grognar the Barbarian's sword"
+    "Corey's department is engineering"
 ];
 /*
 let siriphrases = [
@@ -252,11 +256,12 @@ app.init("nlqp", function () {
     console.log("Running " + phrases.length + " tests...");
     console.log("===========================================================================================");
     var queryStates = phrases.map(function (phrase) { return parseTest(phrase, n); });
-    var complete = queryStates.filter(function (state) { return state === nlqp.StateFlags.COMPLETE; }).length;
-    var moreinfo = queryStates.filter(function (state) { return state === nlqp.StateFlags.MOREINFO; }).length;
-    var noresult = queryStates.filter(function (state) { return state === nlqp.StateFlags.NORESULT; }).length;
+    var query = queryStates.filter(function (state) { return state === nlqp.Intents.QUERY; }).length;
+    var insert = queryStates.filter(function (state) { return state === nlqp.Intents.INSERT; }).length;
+    var moreinfo = queryStates.filter(function (state) { return state === nlqp.Intents.MOREINFO; }).length;
+    var noresult = queryStates.filter(function (state) { return state === nlqp.Intents.NORESULT; }).length;
     console.log("===========================================================================================");
-    console.log("Total Queries: " + phrases.length + " | Complete: " + complete + " | MoreInfo: " + moreinfo + " | NoResult: " + noresult);
+    console.log("Total Queries: " + phrases.length + " | Query: " + query + " | Insert: " + insert + " | MoreInfo: " + moreinfo + " | NoResult: " + noresult);
     console.log("===========================================================================================");
 });
 //# sourceMappingURL=NLQPTest.js.map

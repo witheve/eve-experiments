@@ -3,6 +3,7 @@ var utils_1 = require("./utils");
 var runtime_1 = require("./runtime");
 var richTextEditor_1 = require("./richTextEditor");
 var uitk = require("./uitk");
+var uitk_1 = require("./uitk");
 var app_1 = require("./app");
 var parser_1 = require("./parser");
 var NLQueryParser_1 = require("./NLQueryParser");
@@ -30,6 +31,7 @@ exports.uiState = {
         table: {},
         collapsible: {},
         attributes: {},
+        card: {},
     },
     pane: {},
     prompt: { open: false, paneId: undefined, prompt: undefined },
@@ -37,9 +39,6 @@ exports.uiState = {
 //---------------------------------------------------------
 // Utils
 //---------------------------------------------------------
-function preventDefault(event) {
-    event.preventDefault();
-}
 // @NOTE: ids must not contain whitespace
 function asEntity(raw) {
     var cleaned = raw && ("" + raw).trim();
@@ -53,6 +52,7 @@ function asEntity(raw) {
     var _a = (app_1.eve.findOne("index name", { name: cleaned }) || {}).id, id = _a === void 0 ? undefined : _a;
     return id;
 }
+exports.asEntity = asEntity;
 function setURL(paneId, contains, replace) {
     var name = uitk.resolveName(contains);
     if (paneId !== "p1")
@@ -71,81 +71,226 @@ function setURL(paneId, contains, replace) {
         window.history.replaceState(state, null, url);
     else
         window.history.pushState(state, null, url);
+    historyState = state;
+    historyURL = url;
 }
 exports.setURL = setURL;
+function inferRepresentation(search, baseParams) {
+    if (baseParams === void 0) { baseParams = {}; }
+    var params = utils_1.copy(baseParams);
+    var entityId = asEntity(search);
+    var cleaned = (search && ("" + search).trim().toLowerCase()) || "";
+    if (entityId || cleaned.length === 0) {
+        params.entity = entityId || utils_1.builtinId("home");
+        if (params.entity === utils_1.builtinId("home")) {
+            params.unwrapped = true;
+        }
+        return { rep: "entity", params: params };
+    }
+    var _a = cleaned.split("|"), rawContent = _a[0], rawParams = _a[1];
+    var parsedParams = getCellParams(rawContent, rawParams);
+    params = utils_1.mergeObject(params, parsedParams);
+    if (params.rep === "table") {
+        params.search = cleaned;
+    }
+    return { rep: params.rep, params: params };
+}
+function staticOrMappedTable(search, params) {
+    var parsed = NLQueryParser_1.parse(search);
+    var topParse = parsed[0];
+    params.rep = "table";
+    params.search = search;
+    // @NOTE: This requires the first project to be the main result of the search
+    params.fields = topParse.query.projects[0].fields.map(function (field) { return field.name; });
+    params.groups = topParse.context.groupings.map(function (group) { return group.name; });
+    //params.fields = uitk.getFields({example: results[0], blacklist: ["__id"]});
+    if (!topParse)
+        return params;
+    // Must not contain any primitive relations
+    var editable = true;
+    var subject;
+    var entity;
+    var fieldMap = {};
+    var collections = [];
+    for (var ctx in topParse.context) {
+        if (ctx === "attributes" || ctx === "entities" || ctx === "collections")
+            continue;
+        for (var _i = 0, _a = topParse.context[ctx]; _i < _a.length; _i++) {
+            var node = _a[_i];
+            if (node.project) {
+                editable = false;
+                break;
+            }
+        }
+    }
+    // Number of subjects (projected entities or collections) must be 1.
+    if (editable) {
+        for (var _b = 0, _c = topParse.context.collections; _b < _c.length; _b++) {
+            var node = _c[_b];
+            var coll = node.collection;
+            if (coll.project) {
+                if (subject) {
+                    editable = false;
+                    break;
+                }
+                else {
+                    subject = coll.displayName;
+                }
+            }
+            collections.push(coll.id);
+        }
+    }
+    if (editable) {
+        for (var _d = 0, _e = topParse.context.entities; _d < _e.length; _d++) {
+            var node = _e[_d];
+            var ent = node.entity;
+            if (ent.project) {
+                if (subject) {
+                    editable = false;
+                    break;
+                }
+                else {
+                    subject = ent.displayName;
+                    entity = ent.id;
+                }
+            }
+        }
+    }
+    if (editable) {
+        for (var _f = 0, _g = topParse.context.attributes; _f < _g.length; _f++) {
+            var node = _g[_f];
+            var attr = node.attribute;
+            if (attr.project) {
+                fieldMap[attr.displayName] = attr.id;
+            }
+        }
+        if (entity && Object.keys(fieldMap).length !== 1)
+            editable = false;
+    }
+    if (editable) {
+        params.rep = "mappedTable";
+        params.subject = subject;
+        params.entity = entity;
+        params.fieldMap = fieldMap;
+        params.collections = collections;
+        console.log("MAPPED PARAMS", params);
+        return params;
+    }
+    return params;
+}
 //---------------------------------------------------------
 // Dispatches
 //---------------------------------------------------------
+app_1.handle("ui update search", function (changes, _a) {
+    var paneId = _a.paneId, value = _a.value;
+    var state = exports.uiState.widget.search[paneId] = exports.uiState.widget.search[paneId] || { value: value };
+    state.value = value;
+});
 app_1.handle("ui focus search", function (changes, _a) {
     var paneId = _a.paneId, value = _a.value;
     var state = exports.uiState.widget.search[paneId] = exports.uiState.widget.search[paneId] || { value: value };
     state.focused = true;
 });
-app_1.handle("ui set search", function (changes, _a) {
-    var paneId = _a.paneId, value = _a.value, peek = _a.peek, x = _a.x, y = _a.y, popState = _a.popState;
-    value = value.trim();
-    var entity = asEntity(value);
-    if (entity)
-        value = entity;
-    var fact;
+// @TODO: abstract (search) => {rep, params} fn and use it to infer {rep, params} for set pane and set popout.
+// @TODO: Update pane(paneId) to take the actual pane fact so it's not tied to the DB.
+// @TODO: Update pane(pane) to just directly call represent with the pane's facts.
+app_1.handle("set pane", function (changes, info) {
+    // Infer valid rep and params if search has changed
+    if (info.contains !== undefined && !info.rep) {
+        var inferred = inferRepresentation(info.contains, typeof info.params === "string" ? parseParams(info.params) : info.params);
+        info.rep = inferred.rep;
+        info.params = inferred.params;
+        if (!info.rep)
+            throw new Error("Could not infer a valid representation for search '" + info.contains + "' in pane '" + info.paneId + "'");
+    }
+    // Fill missing properties from the previous fact, if present
+    var prev = app_1.eve.findOne("ui pane", { pane: info.paneId }) || {};
+    var paneId = info.paneId, _a = info.kind, kind = _a === void 0 ? prev.kind : _a, _b = info.rep, rep = _b === void 0 ? prev.rep : _b, _c = info.contains, raw = _c === void 0 ? prev.contains : _c, _d = info.params, rawParams = _d === void 0 ? prev.params : _d, _e = info.popState, popState = _e === void 0 ? false : _e;
+    if (kind === undefined || rep == undefined || raw === undefined || rawParams === undefined) {
+        throw new Error("Cannot create new pane without all parameters specified for pane '" + paneId + "'");
+    }
+    var contains = asEntity(raw) || ("" + raw).trim();
+    var params = typeof rawParams === "object" ? stringifyParams(rawParams) : rawParams || "";
+    var state = exports.uiState.widget.search[paneId] = exports.uiState.widget.search[paneId] || { value: contains, focused: false };
+    state.value = contains;
+    state.focused = false;
+    app_1.dispatch("remove pane", { paneId: paneId }, changes);
+    changes.add("ui pane", { pane: paneId, kind: kind, rep: rep, contains: contains, params: params });
+    // @TODO: Make "p1" a constant
     if (paneId === "p1") {
         popoutHistory = [];
-    }
-    else if (!popState) {
-        var popout = app_1.eve.findOne("ui pane", { kind: PANE.POPOUT });
-        if (popout) {
-            popoutHistory.push(popout.contains); // @FIXME: This is fragile
-        }
-    }
-    if (!peek) {
-        var state = exports.uiState.widget.search[paneId] = exports.uiState.widget.search[paneId] || { value: value };
-        state.value = value;
-        state.focused = false;
-        fact = utils_1.copy(app_1.eve.findOne("ui pane", { pane: paneId }));
-        fact.__id = undefined;
-        fact.contains = value;
-        changes.remove("ui pane", { pane: paneId });
-        var children = app_1.eve.find("ui pane parent", { parent: paneId });
-        for (var _i = 0; _i < children.length; _i++) {
-            var child = children[_i].pane;
-            changes.remove("ui pane position", { pane: child });
-            changes.remove("ui pane", { pane: child });
-        }
-        changes.remove("ui pane parent", { parent: paneId });
         if (!popState)
-            setURL(paneId, value);
+            setURL(paneId, contains);
     }
-    else {
-        var popout = app_1.eve.findOne("ui pane", { kind: PANE.POPOUT });
-        var neuePaneId;
-        if (!popout) {
-            neuePaneId = utils_1.uuid();
-        }
-        else {
-            neuePaneId = popout.pane;
-            changes.remove("ui pane", { pane: neuePaneId });
-        }
-        var state = exports.uiState.widget.search[neuePaneId] = { value: value };
-        fact = { contains: value, pane: neuePaneId, kind: PANE.POPOUT };
-        if (!popout || paneId !== neuePaneId) {
-            if (x !== undefined && y !== undefined) {
-                changes.remove("ui pane position", { pane: neuePaneId });
-                changes.add("ui pane position", { pane: neuePaneId, x: x, y: y });
-            }
-            changes.remove("ui pane parent", { parent: paneId });
-            changes.add("ui pane parent", { pane: neuePaneId, parent: paneId });
-        }
-        paneId = neuePaneId;
-    }
-    changes.add("ui pane", fact);
 });
+app_1.handle("remove pane", function (changes, _a) {
+    var paneId = _a.paneId;
+    var children = app_1.eve.find("ui pane parent", { parent: paneId });
+    for (var _i = 0; _i < children.length; _i++) {
+        var child = children[_i].pane;
+        app_1.dispatch("remove pane", { paneId: child }, changes);
+    }
+    changes.remove("ui pane", { pane: paneId })
+        .remove("ui pane position", { pane: paneId })
+        .remove("ui pane parent", { parent: paneId })
+        .remove("ui pane parent", { pane: paneId });
+});
+app_1.handle("set popout", function (changes, info) {
+    // Recycle the parent's existing popout if it exists, otherwise create a new one
+    var parentId = info.parentId;
+    var paneId = utils_1.uuid();
+    var children = app_1.eve.find("ui pane parent", { parent: parentId });
+    var parent = app_1.eve.findOne("ui pane", { pane: parentId });
+    var reusing = false;
+    if (parent && parent.kind === PANE.POPOUT) {
+        reusing = true;
+        paneId = parentId;
+        parentId = app_1.eve.findOne("ui pane parent", { pane: parentId }).parent;
+    }
+    else if (children.length) {
+        //check if there is already a child popout
+        for (var _i = 0; _i < children.length; _i++) {
+            var childRel = children[_i];
+            var child = app_1.eve.findOne("ui pane", { pane: childRel.pane });
+            if (child.kind === PANE.POPOUT) {
+                paneId = child.pane;
+                break;
+            }
+        }
+    }
+    // Infer valid rep and params if search has changed
+    if (info.contains && !info.rep) {
+        var inferred = inferRepresentation(info.contains, typeof info.params === "string" ? parseParams(info.params) : info.params);
+        info.rep = inferred.rep;
+        info.params = inferred.params;
+        if (!info.rep)
+            throw new Error("Could not infer a valid representation for search '" + info.contains + "' in popout '" + paneId + "'");
+    }
+    // Fill missing properties from the previous fact, if present
+    var prev = app_1.eve.findOne("ui pane", { pane: paneId }) || {};
+    var prevPos = app_1.eve.findOne("ui pane position", { pane: paneId }) || {};
+    var _a = info.rep, rep = _a === void 0 ? prev.rep : _a, _b = info.contains, raw = _b === void 0 ? prev.contains : _b, _c = info.params, rawParams = _c === void 0 ? prev.params : _c, _d = info.x, x = _d === void 0 ? prevPos.x : _d, _e = info.y, y = _e === void 0 ? prevPos.y : _e, _f = info.popState, popState = _f === void 0 ? false : _f;
+    if (rep === undefined || raw === undefined || rawParams === undefined || x === undefined || y === undefined) {
+        throw new Error("Cannot create new popout without all parameters specified for pane '" + paneId + "'");
+    }
+    if (reusing) {
+        x = prevPos.x;
+        y = prevPos.y;
+    }
+    var params = typeof rawParams === "string" ? rawParams : stringifyParams(rawParams);
+    var contains = asEntity(raw) || ("" + raw).trim();
+    if (!popState && prev.pane)
+        popoutHistory.push({ rep: prev.rep, contains: prev.contains, params: prev.params, x: prevPos.x, y: prevPos.y });
+    app_1.dispatch("remove pane", { paneId: paneId }, changes);
+    changes.add("ui pane", { pane: paneId, kind: PANE.POPOUT, rep: rep, contains: contains, params: params })
+        .add("ui pane parent", { parent: parentId, pane: paneId })
+        .add("ui pane position", { pane: paneId, x: x, y: y });
+});
+// @TODO: take parentId
 app_1.handle("remove popup", function (changes, _a) {
     var popup = app_1.eve.findOne("ui pane", { kind: PANE.POPOUT });
-    if (popup) {
-        var paneId = popup.pane;
-        changes.remove("ui pane", { pane: paneId });
-        changes.remove("ui pane position", { pane: paneId });
-    }
+    if (popup)
+        app_1.dispatch("remove pane", { paneId: popup.pane }, changes);
     popoutHistory = [];
 });
 app_1.handle("ui toggle search plan", function (changes, _a) {
@@ -154,14 +299,33 @@ app_1.handle("ui toggle search plan", function (changes, _a) {
     state.plan = !state.plan;
 });
 app_1.handle("add sourced eav", function (changes, eav) {
-    if (!eav.source) {
-        eav.source = utils_1.uuid();
+    var entity = eav.entity, attribute = eav.attribute, value = eav.value, source = eav.source, forceEntity = eav.forceEntity;
+    if (!source) {
+        source = utils_1.uuid();
     }
-    var valueId = asEntity(eav.value);
+    var valueId = asEntity(value);
+    var coerced = utils_1.coerceInput(value);
+    var strValue = value.toString().trim();
     if (valueId) {
-        eav.value = valueId;
+        value = valueId;
     }
-    changes.add("sourced eav", eav);
+    else if (strValue[0] === '"' && strValue[strValue.length - 1] === '"') {
+        value = JSON.parse(strValue);
+    }
+    else if (typeof coerced === "number") {
+        value = coerced;
+    }
+    else if (forceEntity || attribute === "is a") {
+        var newEntity = utils_1.uuid();
+        var pageId = utils_1.uuid();
+        changes.dispatch("create page", { page: pageId, content: "" })
+            .dispatch("create entity", { entity: newEntity, name: strValue, page: pageId });
+        value = newEntity;
+    }
+    else {
+        value = coerced;
+    }
+    changes.add("sourced eav", { entity: entity, attribute: attribute, value: value, source: source });
 });
 app_1.handle("remove sourced eav", function (changes, eav) {
     changes.remove("sourced eav", eav);
@@ -170,19 +334,19 @@ app_1.handle("update page", function (changes, _a) {
     var page = _a.page, content = _a.content;
     changes.remove("page content", { page: page });
     changes.add("page content", { page: page, content: content });
-    var trimmed = content.trim();
-    var endIx = trimmed.indexOf("\n");
-    var name = trimmed.slice(1, endIx !== -1 ? endIx : undefined).trim();
-    var entity = app_1.eve.findOne("entity page", { page: page }).entity;
-    var _b = (app_1.eve.findOne("display name", { id: entity }) || {}).name, prevName = _b === void 0 ? undefined : _b;
-    if (name !== prevName) {
-        changes.remove("display name", { id: entity, name: prevName });
-        changes.add("display name", { id: entity, name: name });
-        var parts = utils_1.location().split("/");
-        if (parts.length > 2 && parts[2].replace(/_/gi, " ") === entity) {
-            window.history.replaceState(window.history.state, null, "/" + utils_1.slugify(name) + "/" + utils_1.slugify(entity));
-        }
-    }
+    // let trimmed = content.trim();
+    // let endIx = trimmed.indexOf("\n");
+    // let name = trimmed.slice(1, endIx !== -1 ? endIx : undefined).trim();
+    // let {entity} = eve.findOne("entity page", {page});
+    // let {name:prevName = undefined} = eve.findOne("display name", {id: entity}) || {};
+    // if(name !== prevName) {
+    //   changes.remove("display name", {id: entity, name: prevName});
+    //   changes.add("display name", {id: entity, name});
+    //   let parts = getLocation().split("/");
+    //   if(parts.length > 2 && parts[2].replace(/_/gi, " ") === entity) {
+    //     window.history.replaceState(window.history.state, null, `/${slugify(name)}/${slugify(entity)}`);
+    //   }
+    // }
 });
 app_1.handle("create entity", function (changes, _a) {
     var entity = _a.entity, page = _a.page, _b = _a.name, name = _b === void 0 ? "Untitled" : _b;
@@ -219,10 +383,11 @@ app_1.handle("create query", function (changes, _a) {
 app_1.handle("insert query", function (changes, _a) {
     var query = _a.query;
     query = query.trim().toLowerCase();
+    var parsed = NLQueryParser_1.parse(query);
+    var topParse = parsed[0];
     if (app_1.eve.findOne("query to id", { query: query }))
         return;
-    var parsed = NLQueryParser_1.parse(query);
-    if (parsed[0].state === NLQueryParser_1.StateFlags.COMPLETE) {
+    if (topParse.intent === NLQueryParser_1.Intents.QUERY) {
         var artifacts = parser_1.parseDSL(parsed[0].query.toString());
         if (artifacts.changeset)
             changes.merge(artifacts.changeset);
@@ -238,6 +403,48 @@ app_1.handle("insert query", function (changes, _a) {
         changes.add("query to id", { query: query, id: rootId });
     }
 });
+app_1.handle("handle setAttribute in a search", function (changes, _a) {
+    var attribute = _a.attribute, entity = _a.entity, value = _a.value, replace = _a.replace;
+    if (replace) {
+        //check if there's a generator, if so, remove that.
+        var generated = app_1.eve.find("generated eav", { entity: entity, attribute: attribute });
+        if (generated.length) {
+            for (var _i = 0; _i < generated.length; _i++) {
+                var gen = generated[_i];
+                changes.merge(app_1.dispatch("remove attribute generating query", { eav: { entity: entity, attribute: attribute }, view: gen["source"] }));
+            }
+        }
+        else {
+            changes.remove("sourced eav", { entity: entity, attribute: attribute });
+        }
+    }
+    changes.merge(app_1.dispatch("add sourced eav", { entity: entity, attribute: attribute, value: value }));
+});
+function dispatchSearchSetAttributes(query, chain) {
+    if (!chain) {
+        chain = app_1.dispatch();
+    }
+    var parsed = NLQueryParser_1.parse(query);
+    var topParse = parsed[0];
+    var isSetSearch = false;
+    if (topParse.intent === NLQueryParser_1.Intents.INSERT) {
+        console.log(topParse.context);
+        // debugger;
+        var attributes = [];
+        for (var _i = 0, _a = topParse.inserts; _i < _a.length; _i++) {
+            var insert = _a[_i];
+            // @TODO: NLP needs to tell us whether we're supposed to modify this attribute
+            // or if we're just adding a new eav for it.
+            var replace = true;
+            var entity = insert.entity.entity.id;
+            var attribute = insert.attribute.attribute.displayName;
+            var value;
+        }
+        query = attributes.join(" and ");
+        isSetSearch = true;
+    }
+    return { chain: chain, query: query, isSetSearch: isSetSearch };
+}
 // @TODO: there's a lot of duplication between insert query, create query, and insert implication
 app_1.handle("insert implication", function (changes, _a) {
     var query = _a.query;
@@ -273,13 +480,13 @@ app_1.handle("rename entity attribute", function (changes, _a) {
     changes.add("sourced eav", { entity: entity, attribute: attribute, value: value, source: source });
 });
 app_1.handle("sort table", function (changes, _a) {
-    var key = _a.key, field = _a.field, direction = _a.direction;
-    var state = exports.uiState.widget.table[key] || { field: undefined, direction: undefined };
-    if (field !== undefined)
-        state.field = field;
+    var state = _a.state, field = _a.field, direction = _a.direction;
+    if (field !== undefined) {
+        state.sortField = field;
+        state.sortDirection = 1;
+    }
     if (direction !== undefined)
-        state.direction = direction;
-    exports.uiState.widget.table[key] = state;
+        state.sortDirection = direction;
 });
 app_1.handle("toggle settings", function (changes, _a) {
     var paneId = _a.paneId, _b = _a.open, open = _b === void 0 ? undefined : _b;
@@ -335,7 +542,7 @@ var paneChrome = (_a = {},
     _a[PANE.FULL] = function (paneId, entityId) { return ({
         c: "fullscreen",
         header: { t: "header", c: "flex-row", children: [
-                { c: "logo eve-logo", data: { paneId: paneId }, link: "", click: navigate },
+                // {c: "logo eve-logo", data: {paneId}, link: "", click: navigate},
                 searchInput(paneId, entityId),
                 { c: "controls visible", children: [
                         { c: "ion-gear-a toggle-settings", style: "font-size: 1.35em;", prompt: paneSettings, paneId: paneId, click: openPrompt }
@@ -375,14 +582,14 @@ function closePrompt(event, elem) {
 }
 function navigateParent(event, elem) {
     app_1.dispatch("remove popup", { paneId: elem.paneId })
-        .dispatch("ui set search", { paneId: elem.parentId, value: elem.link })
+        .dispatch("set pane", { paneId: elem.parentId, contains: elem.link })
         .commit();
 }
 function removePopup(event, elem) {
     if (!event.defaultPrevented) {
         var chain = app_1.dispatch("remove popup", {}).dispatch("clearActiveCells", {});
-        for (var entity_1 in exports.uiState.widget.attributes) {
-            chain.dispatch("clearActiveAttribute", { entity: entity_1 });
+        for (var entity in exports.uiState.widget.attributes) {
+            chain.dispatch("clearActiveAttribute", { entity: entity });
         }
         chain.commit();
     }
@@ -460,68 +667,89 @@ function loadedPrompt() {
 }
 function pane(paneId) {
     // @FIXME: Add kind to ui panes
-    var _a = app_1.eve.findOne("ui pane", { pane: paneId }) || {}, _b = _a.contains, contains = _b === void 0 ? undefined : _b, _c = _a.kind, kind = _c === void 0 ? PANE.FULL : _c;
-    var cleaned = contains && contains.trim().toLowerCase();
+    var _a = app_1.eve.findOne("ui pane", { pane: paneId }) || {}, _b = _a.contains, rawContains = _b === void 0 ? undefined : _b, _c = _a.kind, kind = _c === void 0 ? PANE.FULL : _c, _d = _a.rep, rep = _d === void 0 ? undefined : _d, _e = _a.params, rawParams = _e === void 0 ? undefined : _e;
+    var _f = queryUIInfo(rawContains || "home"), results = _f.results, parsedParams = _f.params, contains = _f.content;
+    var params = utils_1.mergeObject(parseParams(rawParams), parsedParams);
+    params.paneId = paneId;
     var makeChrome = paneChrome[kind];
     if (!makeChrome)
         throw new Error("Unknown pane kind: '" + kind + "' (" + PANE[kind] + ")");
-    var _d = makeChrome(paneId, contains), klass = _d.c, header = _d.header, footer = _d.footer, captureClicks = _d.captureClicks;
-    var content;
+    var _g = makeChrome(paneId, contains), klass = _g.c, header = _g.header, footer = _g.footer, captureClicks = _g.captureClicks;
     var entityId = asEntity(contains);
-    var contentType = "entity";
-    if (contains.length === 0) {
-        content = entity(utils_1.builtinId("home"), paneId, kind);
-    }
-    else if (cleaned.indexOf("search: ") === 0) {
+    var content;
+    var contentType = "invalid";
+    if (contains.length === 0 || entityId)
+        contentType = "entity";
+    else if (app_1.eve.findOne("query to id", { query: contains }))
         contentType = "search";
-        content = search(cleaned.substring("search: ".length), paneId);
+    if (params.rep || rep) {
+        content = represent(contains, params.rep || rep, results, params, (params.unwrapped ? undefined : function (elem, ix) { return uitk.card({ id: paneId + "|" + contains + "|" + (ix === undefined ? "" : ix), children: [elem] }); }));
+        content.t = "content";
+        content.c = (content.c || "") + " " + (params.unwrapped ? "unwrapped" : "");
     }
-    else if (entityId) {
-        var options = {};
-        content = entity(entityId, paneId, kind, options);
+    var disambiguation;
+    if (contentType === "invalid") {
+        disambiguation = { c: "flex-row spaced-row disambiguation", children: [
+                { t: "span", text: "I couldn't find anything; should I" },
+                { t: "a", c: "link btn add-btn", text: "add " + contains, name: contains, paneId: paneId, click: createPage },
+                { t: "span", text: "?" },
+            ] };
+        content = undefined;
     }
-    else if (app_1.eve.findOne("query to id", { query: cleaned })) {
-        contentType = "search";
-        content = search(cleaned, paneId);
-    }
-    else if (contains !== "") {
-        content = { c: "flex-row spaced-row", children: [
-                { t: "span", text: "The page " + contains + " does not exist. Would you like to" },
-                { t: "a", c: "link btn add-btn", text: "create it?", name: contains, paneId: paneId, click: createPage }
+    else if (contentType === "search") {
+        // @TODO: This needs to move into Eve's notification / chat bar
+        disambiguation = { id: "search-disambiguation", c: "flex-row spaced-row disambiguation", children: [
+                { text: "Or should I" },
+                { t: "a", c: "link btn add-btn", text: "add a card", name: contains, paneId: paneId, click: createPage },
+                { text: "for " + contains + "?" }
             ] };
     }
-    if (contentType === "search") {
-        var disambiguation = { id: "search-disambiguation", c: "flex-row spaced-row disambiguation", children: [
-                { text: "Did you mean to" },
-                { t: "a", c: "link btn add-btn", text: "create a new page", name: contains, paneId: paneId, click: createPage },
-                { text: "with this name?" }
+    var scroller = content;
+    if (kind === PANE.FULL) {
+        scroller = { c: "scroller", children: [
+                { c: "top-scroll-fade" },
+                content,
+                { c: "bottom-scroll-fade" },
             ] };
     }
-    var pane = { c: "wiki-pane " + (klass || ""), paneId: paneId, children: [header, disambiguation, content, footer] };
+    var pane = { c: "wiki-pane " + (klass || ""), paneId: paneId, children: [header, disambiguation, scroller, footer] };
     var pos = app_1.eve.findOne("ui pane position", { pane: paneId });
     if (pos) {
         pane.style = "left: " + (isNaN(pos.x) ? pos.x : pos.x + "px") + "; top: " + (isNaN(pos.y) ? pos.y : (pos.y + 20) + "px") + ";";
     }
     if (captureClicks) {
-        pane.click = preventDefault;
+        pane.click = uitk_1.preventDefault;
     }
     if (exports.uiState.prompt.open && exports.uiState.prompt.paneId === paneId) {
-        pane.children.push({ style: "position: absolute; top: 0; left: 0; bottom: 0; right: 0; z-index: 10; background: rgba(0, 0, 0, 0.0);", paneId: paneId, click: closePrompt }, exports.uiState.prompt.prompt(paneId));
+        pane.children.push({ c: "shade", paneId: paneId, click: closePrompt }, exports.uiState.prompt.prompt(paneId));
     }
     return pane;
 }
 exports.pane = pane;
+function search(search, paneId) {
+    var _a = search.split("|"), rawContent = _a[0], rawParams = _a[1];
+    var parsedParams = getCellParams(rawContent, rawParams);
+    var _b = queryUIInfo(search), results = _b.results, params = _b.params, content = _b.content;
+    params["paneId"] = paneId;
+    utils_1.mergeObject(params, parsedParams);
+    var rep = represent(content, params["rep"], results, params);
+    return { t: "content", c: "wiki-search", children: [
+            rep
+        ] };
+}
+exports.search = search;
 function createPage(evt, elem) {
     var name = elem["name"];
     var entity = utils_1.uuid();
     var page = utils_1.uuid();
-    app_1.dispatch("create page", { page: page, content: "# " + name + "\n" })
-        .dispatch("create entity", { entity: entity, page: page, name: name }).commit();
+    app_1.dispatch("create page", { page: page, content: "" })
+        .dispatch("create entity", { entity: entity, page: page, name: name })
+        .dispatch("set pane", { paneId: elem["paneId"], contains: entity, rep: "entity", params: "" }).commit();
 }
 function deleteEntity(event, elem) {
     var name = uitk.resolveName(elem.entity);
     app_1.dispatch("remove entity", { entity: elem.entity }).commit();
-    app_1.dispatch("ui set search", { paneId: elem.paneId, value: name }).commit();
+    app_1.dispatch("set pane", { paneId: elem.paneId, contains: name }).commit();
 }
 function paneSettings(paneId) {
     var pane = app_1.eve.findOne("ui pane", { pane: paneId });
@@ -530,21 +758,10 @@ function paneSettings(paneId) {
     return { t: "ul", c: "settings", children: [
             { t: "li", c: "save-btn", text: "save", prompt: savePrompt, click: openPrompt },
             { t: "li", c: "load-btn", text: "load", prompt: loadPrompt, click: openPrompt },
-            entity && !isSystem ? { t: "li", c: "delete-btn", text: "delete page", entity: entity, paneId: paneId, click: deleteEntity } : undefined,
+            entity && !isSystem ? { t: "li", c: "delete-btn", text: "delete card", entity: entity, paneId: paneId, click: deleteEntity } : undefined,
             { t: "li", c: "delete-btn", text: "DELETE DATABASE", prompt: deleteDatabasePrompt, click: openPrompt },
         ] };
 }
-function search(search, paneId) {
-    var _a = search.split("|"), rawContent = _a[0], rawParams = _a[1];
-    var parsedParams = getCellParams(rawContent, rawParams);
-    var _b = queryUIInfo(search), results = _b.results, params = _b.params, content = _b.content;
-    utils_1.mergeObject(params, parsedParams);
-    var rep = represent(content, params["rep"], results, params);
-    return { t: "content", c: "wiki-search", children: [
-            rep
-        ] };
-}
-exports.search = search;
 function sizeColumns(node, elem) {
     // @FIXME: Horrible hack to get around randomly added "undefined" text node that's coming from in microreact.
     var cur = node;
@@ -581,9 +798,17 @@ function parseParams(rawParams) {
         var _b = kv.split("="), key = _b[0], value = _b[1];
         if (!key || !key.trim())
             continue;
-        if (!value || !value.trim())
+        value = value.trim();
+        if (!value)
             throw new Error("Must specify value for key '" + key + "'");
-        params[key.trim()] = utils_1.coerceInput(value.trim());
+        if (value[0] === "{" && value[value.length - 1] === "}" || value[0] === "[" && value[value.length - 1] === "]") {
+            try {
+                var result = JSON.parse(value);
+                value = result;
+            }
+            catch (err) { }
+        }
+        params[key.trim()] = utils_1.coerceInput(value);
     }
     return params;
 }
@@ -591,8 +816,11 @@ function stringifyParams(params) {
     var rawParams = "";
     if (!params)
         return rawParams;
-    for (var key in params)
-        rawParams += "" + (rawParams.length ? "; " : "") + key + " = " + params[key];
+    for (var key in params) {
+        if (params[key] === undefined || params[key] === null)
+            continue;
+        rawParams += "" + (rawParams.length ? "; " : "") + key + " = " + (typeof params[key] === "object" ? JSON.stringify(params[key]) : params[key]);
+    }
     return rawParams;
 }
 function cellUI(paneId, query, cell) {
@@ -627,7 +855,6 @@ function queryUIInfo(query) {
             if (!queryResults.length) {
                 params["rep"] = "error";
                 params["message"] = "No results";
-                results = {};
             }
             else {
                 results = { unprojected: queryUnprojected, results: queryResults };
@@ -636,7 +863,6 @@ function queryUIInfo(query) {
         else {
             params["rep"] = "error";
             params["message"] = "invalid search";
-            results = {};
         }
     }
     return { results: results, params: params, content: content };
@@ -663,24 +889,37 @@ function getCellParams(content, rawParams) {
         var aggregates = [];
         for (var _i = 0, _a = context_1.fxns; _i < _a.length; _i++) {
             var fxn = _a[_i];
-            if (fxn.type === NLQueryParser_1.FunctionTypes.AGGREGATE) {
+            if (fxn.fxn.type === NLQueryParser_1.FunctionTypes.AGGREGATE) {
                 aggregates.push(fxn);
             }
+        }
+        var totalFound = 0;
+        for (var _b = 0, _c = ["attributes", "entities", "collections", "fxns", "maybeAttributes", "maybeEntities", "maybeCollections", "maybeFunctions"]; _b < _c.length; _b++) {
+            var item = _c[_b];
+            totalFound += context_1[item].length;
         }
         if (aggregates.length === 1 && context_1["groupings"].length === 0) {
             rep = "CSV";
             field = aggregates[0].name;
         }
-        else if (!hasCollections && context_1.fxns.length === 1) {
+        else if (!hasCollections && context_1.fxns.length === 1 && context_1.fxns[0].fxn.type !== NLQueryParser_1.FunctionTypes.BOOLEAN) {
             rep = "CSV";
             field = context_1.fxns[0].name;
         }
         else if (!hasCollections && context_1.attributes.length === 1) {
             rep = "CSV";
-            field = context_1.attributes[0].displayName;
+            field = context_1.attributes[0].name;
+        }
+        else if (context_1.entities.length + context_1.fxns.length === totalFound) {
+            // if there are only entities and boolean functions then we want to show this as cards
+            params["rep"] = "entity";
+        }
+        else if (currentParse.query && currentParse.query.projects.length) {
+            staticOrMappedTable(content, params);
         }
         else {
-            params["rep"] = "table";
+            // Error state, unknown entity
+            params["rep"] = "error";
         }
         if (rep) {
             params["rep"] = rep;
@@ -692,8 +931,10 @@ function getCellParams(content, rawParams) {
 var paneEditors = {};
 function wikiEditor(node, elem) {
     richTextEditor_1.createEditor(node, elem);
-    paneEditors[elem.meta.paneId] = node.editor;
+    var _a = elem.meta, paneId = _a.paneId, entityId = _a.entityId;
+    paneEditors[(paneId + "|" + entityId)] = node.editor;
 }
+exports.wikiEditor = wikiEditor;
 function reparentCell(node, elem) {
     if (node.parentNode.id !== elem.containerId) {
         document.getElementById(elem.containerId).appendChild(node);
@@ -709,7 +950,7 @@ function focusCellEditor(node, elem) {
 }
 //---------------------------------------------------------
 function cellEditor(entityId, paneId, cell) {
-    var text = activeCells[cell.id].query;
+    var text = exports.activeCells[cell.id].query;
     var _a = autocompleterOptions(entityId, paneId, cell), options = _a.options, selected = _a.selected;
     var autoFocus = true;
     if (text.match(/\$\$.*\$\$/)) {
@@ -722,7 +963,7 @@ function cellEditor(entityId, paneId, cell) {
     return { children: [
             { c: "embedded-cell", children: [
                     { c: "adornment", text: "=" },
-                    { t: "span", c: "", contentEditable: true, text: text, click: preventDefault, input: updateActiveCell, keydown: embeddedCellKeys, cell: cell, selected: selected, paneId: paneId, postRender: autoFocus ? focusCellEditor : undefined },
+                    { t: "span", c: "", contentEditable: true, text: text, click: uitk_1.preventDefault, input: updateActiveCell, keydown: embeddedCellKeys, cell: cell, selected: selected, paneId: paneId, postRender: autoFocus ? focusCellEditor : undefined },
                 ] },
             autocompleter(options, paneId, cell)
         ] };
@@ -748,7 +989,7 @@ function executeAutocompleterOption(event, elem) {
     if (event.defaultPrevented)
         return;
     var paneId = elem.paneId, cell = elem.cell;
-    var editor = paneEditors[paneId];
+    var editor = paneEditors[cell.editorId];
     var cm = editor.cmInstance;
     var mark = editor.marks[cell.id];
     var doEmbed = makeDoEmbedFunction(cm, mark, cell, paneId);
@@ -806,9 +1047,6 @@ function autocompleterOptions(entityId, paneId, cell) {
     else if (state === "property") {
         options = propertyAutocompleteOptions(isEntity, parsed, text, params, entityId);
     }
-    else if (state === "attributes ui") {
-        options = attributesUIAutocompleteOptions(isEntity, parsed, text, params, entityId);
-    }
     else if (state === "url") {
         options = urlAutocompleteOptions(isEntity, parsed, text, params, entityId);
     }
@@ -839,7 +1077,7 @@ function positionAutocompleter(node, elem) {
 function queryAutocompleteOptions(isEntity, parsed, text, params, entityId) {
     var pageName = uitk.resolveName(entityId);
     var options = [];
-    var hasValidParse = parsed.some(function (parse) { return parse.state === NLQueryParser_1.StateFlags.COMPLETE; });
+    var hasValidParse = parsed.some(function (parse) { return parse.intent === NLQueryParser_1.Intents.QUERY; });
     parsed.sort(function (a, b) { return b.score - a.score; });
     var topOption = parsed[0];
     var joiner = "a";
@@ -932,7 +1170,7 @@ function createAndEmbed(elem, value, doEmbed) {
     var entity = utils_1.uuid();
     var page = utils_1.uuid();
     var _a = elem.selected, entityId = _a.entityId, attribute = _a.attribute, replace = _a.replace;
-    var chain = app_1.dispatch("create page", { page: page, content: "#" + value + "\n" })
+    var chain = app_1.dispatch("create page", { page: page, content: "" })
         .dispatch("create entity", { entity: entity, page: page, name: value })
         .dispatch("add sourced eav", { entity: entityId, attribute: attribute, value: entity, source: utils_1.uuid() });
     if (replace) {
@@ -986,7 +1224,7 @@ function embedAs(elem, value, doEmbed) {
 function propertyAutocompleteOptions(isEntity, parsed, text, params, entityId) {
     var options = [];
     var topParse = parsed[0];
-    var asQuery = topParse && topParse.state === NLQueryParser_1.StateFlags.COMPLETE;
+    var asQuery = topParse && topParse.intent === NLQueryParser_1.Intents.QUERY;
     var option = { score: 1, action: definePropertyAndEmbed, entityId: entityId, asQuery: asQuery };
     option.children = [
         { c: "attribute-name", text: "property" },
@@ -1097,9 +1335,10 @@ function modifyAndEmbed(elem, text, doEmbed) {
 }
 function interpretAttributeValue(value) {
     var cleaned = value.trim();
-    if (cleaned[0] === "=") {
+    var isNumber = parseFloat(value);
+    if (!isNumber) {
         //parse it
-        cleaned = cleaned.substring(1).trim();
+        cleaned = cleaned.trim();
         var entityId = asEntity(cleaned);
         if (entityId) {
             return { isValue: true, value: entityId };
@@ -1116,6 +1355,7 @@ function handleAttributeDefinition(entity, attribute, search, chain) {
         chain = app_1.dispatch();
     }
     var _a = interpretAttributeValue(search), isValue = _a.isValue, value = _a.value, parse = _a.parse;
+    console.log("HANDLING", isValue, value, parse);
     if (isValue) {
         chain.dispatch("add sourced eav", { entity: entity, attribute: attribute, value: value }).commit();
     }
@@ -1135,7 +1375,7 @@ function handleAttributeDefinition(entity, attribute, search, chain) {
         }
         else {
             //build a query
-            var eavProject = "(query :$$view \"" + entity + "|" + attribute + "|" + id + "\" (select \"" + id + "\" :" + params["field"].replace(" ", "-") + " value)\n                               (project! \"generated eav\" :entity \"" + entity + "\" :attribute \"" + attribute + "\" :value value :source \"" + id + "\"))";
+            var eavProject = "(query :$$view \"" + entity + "|" + attribute + "|" + id + "\" (select \"" + id + "\" :" + params["field"].replace(" ", "-") + " value)\n      (project! \"generated eav\" :entity \"" + entity + "\" :attribute \"" + attribute + "\" :value value :source \"" + id + "\"))";
             chain.dispatch("insert implication", { query: eavProject }).commit();
         }
     }
@@ -1168,65 +1408,10 @@ function defineKeys(event, elem) {
     else if (event.keyCode === utils_1.KEYS.ESC) {
         app_1.dispatch("clearActiveCells").commit();
         if (elem.selected.paneId) {
-            paneEditors[elem.selected.paneId].cmInstance.focus();
+            paneEditors[cell.editorId].cmInstance.focus();
         }
     }
 }
-function entity(entityId, paneId, kind, options) {
-    if (options === void 0) { options = {}; }
-    var _a = (app_1.eve.findOne("entity", { entity: entityId }) || {}).content, content = _a === void 0 ? undefined : _a;
-    if (content === undefined)
-        return { text: "Could not find the requested page" };
-    var page = app_1.eve.findOne("entity page", { entity: entityId })["page"];
-    var name = uitk.resolveName(entityId);
-    var cells = getCells(content, paneId);
-    var keys = {
-        "Backspace": function (cm) { return maybeActivateCell(cm, paneId); },
-        "Cmd-Enter": function (cm) { return maybeNavigate(cm, paneId); },
-        "=": function (cm) { return createEmbedPopout(cm, paneId); }
-    };
-    if (kind === PANE.POPOUT) {
-        keys["Esc"] = function () {
-            app_1.dispatch("remove popup", {}).commit();
-            var parent = app_1.eve.findOne("ui pane parent", { pane: paneId })["parent"];
-            paneEditors[parent].cmInstance.focus();
-        };
-    }
-    var finalOptions = utils_1.mergeObject({ keys: keys }, options);
-    var cellItems = cells.map(function (cell, ix) {
-        var ui;
-        var active = activeCells[cell.id];
-        if (active) {
-            ui = cellEditor(entityId, paneId, active || cell);
-        }
-        else {
-            ui = cellUI(paneId, cell.query, cell);
-        }
-        ui.id = paneId + "|" + cell.id;
-        ui.postRender = reparentCell;
-        ui["containerId"] = paneId + "|" + cell.id + "|container";
-        ui["cell"] = cell;
-        return ui;
-    });
-    var attrs;
-    if (kind !== PANE.POPOUT) {
-        // attrs = uitk.attributes({entity: entityId, data: {paneId}, key: `${paneId}|${entityId}`});
-        attrs = attributesUI(entityId, paneId);
-        attrs.c += " page-attributes";
-    }
-    return { id: paneId + "|" + entityId + "|editor", t: "content", c: "wiki-entity", children: [
-            /* This is disabled because searching for just the name of a single entity resolves to a single find step which blows up on query compilation
-               {c: "flex-row spaced-row disambiguation", children: [
-               {text: "Did you mean to"},
-               {t: "a", c: "link btn add-btn", text: `search for '${name}'`, href: "#", name: search, data: {paneId}, link: `search: ${name}`, click: navigate},
-               {text: "instead?"}
-               ]},
-             */
-            { c: "wiki-editor", postRender: wikiEditor, onUpdate: updatePage, meta: { entity: entityId, page: page, paneId: paneId }, value: content, options: finalOptions, cells: cells, children: cellItems },
-            attrs,
-        ] };
-}
-exports.entity = entity;
 function maybeActivateCell(cm, paneId) {
     if (!cm.somethingSelected()) {
         var pos = cm.getCursor("from");
@@ -1243,9 +1428,6 @@ function maybeActivateCell(cm, paneId) {
         if (cell) {
             var query = cell.query.split("|")[0];
             app_1.dispatch("addActiveCell", { id: cell.id, cell: cell, query: query }).commit();
-            return;
-        }
-        else if (pos.line === 1 && pos.ch === 0) {
             return;
         }
     }
@@ -1270,40 +1452,41 @@ function maybeNavigate(cm, paneId) {
             if (link) {
                 var elem = app_1.renderer.tree[link._id];
                 var coords = cm.cursorCoords(true, "page");
-                navigate({ clientX: coords.left, clientY: coords.top, preventDefault: function () { } }, elem);
+                uitk_1.navigate({ clientX: coords.left, clientY: coords.top, preventDefault: function () { } }, elem);
             }
         }
     }
 }
-var activeCells = {};
+exports.activeCells = {};
 app_1.handle("clearActiveCells", function (changes, info) {
-    for (var cell in activeCells) {
-        changes.dispatch("removeActiveCell", activeCells[cell]);
+    for (var cell in exports.activeCells) {
+        changes.dispatch("removeActiveCell", exports.activeCells[cell]);
     }
 });
 app_1.handle("addActiveCell", function (changes, info) {
     changes.dispatch("clearActiveCells", {});
     var id = info.id;
     info.selected = 0;
-    activeCells[id] = info;
+    info.editorId = info.cell.editorId;
+    exports.activeCells[id] = info;
 });
 app_1.handle("removeActiveCell", function (changes, info) {
     var id = info.id;
-    delete activeCells[id];
+    delete exports.activeCells[id];
 });
 app_1.handle("setCellState", function (changes, info) {
-    var active = activeCells[info.id];
+    var active = exports.activeCells[info.id];
     active.selected = 0;
     active.state = info.state;
 });
 app_1.handle("updateActiveCell", function (changes, info) {
-    var active = activeCells[info.id];
+    var active = exports.activeCells[info.id];
     active.query = info.query;
     active.selected = 0;
     active.state = "query";
 });
 app_1.handle("moveCellAutocomplete", function (changes, info) {
-    var active = activeCells[info.cell.id];
+    var active = exports.activeCells[info.cell.id];
     var direction = info.direction, value = info.value;
     if (value === undefined) {
         active.selected += direction;
@@ -1322,19 +1505,15 @@ function activateCell(event, elem) {
     app_1.dispatch("addActiveCell", { id: cell.id, cell: cell, query: query }).commit();
     event.preventDefault();
 }
-function createEmbedPopout(cm, paneId) {
-    var coords = cm.cursorCoords("head", "page");
-    // dispatch("createEmbedPopout", {paneId, x: coords.left, y: coords.top - 20}).commit();
+function createEmbedPopout(cm, editorId) {
     cm.operation(function () {
         var from = cm.getCursor("from");
         var id = utils_1.uuid();
         cm.replaceRange("=", from, cm.getCursor("to"));
-        if (from.line === 0)
-            return;
         var to = cm.getCursor("from");
         var fromIx = cm.indexFromPos(from);
         var toIx = cm.indexFromPos(to);
-        var cell = { id: id, start: fromIx, length: toIx - fromIx, placeholder: true, query: "", paneId: paneId };
+        var cell = { id: id, start: fromIx, length: toIx - fromIx, placeholder: true, query: "", editorId: editorId };
         app_1.dispatch("addActiveCell", { id: id, query: "", cell: cell, placeholder: true });
     });
 }
@@ -1359,7 +1538,7 @@ function makeDoEmbedFunction(cm, mark, cell, paneId) {
         if (cm.getRange(from, to) !== replacement) {
             cm.replaceRange(replacement, from, to);
         }
-        paneEditors[paneId].cmInstance.focus();
+        paneEditors[cell.editorId].cmInstance.focus();
         var chain = app_1.dispatch("removeActiveCell", cell);
         if (replacement) {
             chain.dispatch("insert query", { query: text });
@@ -1371,13 +1550,13 @@ function embeddedCellKeys(event, elem) {
     var paneId = elem.paneId, cell = elem.cell;
     var target = event.currentTarget;
     var value = target.textContent;
-    var editor = paneEditors[paneId];
+    var editor = paneEditors[cell.editorId];
     var cm = editor.cmInstance;
     var mark = editor.marks[cell.id];
     if (event.keyCode === utils_1.KEYS.BACKSPACE && value === "") {
         var _a = mark.find(), from = _a.from, to = _a.to;
         cm.replaceRange("", from, to);
-        paneEditors[paneId].cmInstance.focus();
+        paneEditors[cell.editorId].cmInstance.focus();
         app_1.dispatch("removeActiveCell", cell).commit();
         event.preventDefault();
     }
@@ -1386,7 +1565,7 @@ function embeddedCellKeys(event, elem) {
         if (cell.placeholder) {
             cm.replaceRange("= ", from, to);
         }
-        paneEditors[paneId].cmInstance.focus();
+        paneEditors[cell.editorId].cmInstance.focus();
         app_1.dispatch("removeActiveCell", cell).commit();
         event.preventDefault();
     }
@@ -1412,20 +1591,41 @@ function embeddedCellKeys(event, elem) {
 function updatePage(meta, content) {
     app_1.dispatch("update page", { page: meta.page, content: content }).commit();
 }
-function navigate(event, elem) {
-    var paneId = elem.data.paneId;
-    var info = { paneId: paneId, value: elem.link, peek: elem.peek };
-    if (event.clientX) {
-        info.x = "calc(50% - 350px)";
-        info.y = event.clientY;
-    }
-    app_1.dispatch("ui set search", info).commit();
-    event.preventDefault();
+//---------------------------------------------------------
+// Editor prep
+//---------------------------------------------------------
+function prepareCardEditor(entityId, paneId) {
+    var _a = (app_1.eve.findOne("entity", { entity: entityId }) || {}).content, content = _a === void 0 ? undefined : _a;
+    var page = app_1.eve.findOne("entity page", { entity: entityId })["page"];
+    var name = uitk.resolveName(entityId);
+    var cells = getCells(content, paneId + "|" + entityId);
+    var cellItems = cells.map(function (cell, ix) {
+        var ui;
+        var active = exports.activeCells[cell.id];
+        if (active) {
+            ui = cellEditor(entityId, paneId, active || cell);
+        }
+        else {
+            ui = cellUI(paneId, cell.query, cell);
+        }
+        ui.id = paneId + "|" + cell.id;
+        ui.postRender = reparentCell;
+        ui["containerId"] = paneId + "|" + cell.id + "|container";
+        ui["cell"] = cell;
+        return ui;
+    });
+    var editorId = paneId + "|" + entityId;
+    var keys = {
+        "Backspace": function (cm) { return maybeActivateCell(cm, editorId); },
+        "Cmd-Enter": function (cm) { return maybeNavigate(cm, editorId); },
+        "=": function (cm) { return createEmbedPopout(cm, editorId); }
+    };
+    return { postRender: wikiEditor, onUpdate: updatePage, options: { keys: keys }, cells: cells, cellItems: cellItems };
 }
 //---------------------------------------------------------
 // Page parsing
 //---------------------------------------------------------
-function getCells(content, paneId) {
+function getCells(content, editorId) {
     var cells = [];
     var ix = 0;
     var ids = {};
@@ -1444,13 +1644,13 @@ function getCells(content, paneId) {
             if (part.match(/\{\$\$.*\$\$\}/)) {
                 placeholder = true;
             }
-            cells.push({ start: ix, length: part.length, value: part, query: part.substring(1, part.length - 1), id: id, placeholder: placeholder });
+            cells.push({ start: ix, length: part.length, value: part, query: part.substring(1, part.length - 1), id: id, placeholder: placeholder, editorId: editorId });
         }
         ix += part.length;
     }
-    for (var active in activeCells) {
-        var cell = activeCells[active].cell;
-        if (cell.placeholder && cell.paneId === paneId) {
+    for (var active in exports.activeCells) {
+        var cell = exports.activeCells[active].cell;
+        if (cell.placeholder && cell.editorId === editorId) {
             cells.push(cell);
         }
     }
@@ -1459,107 +1659,495 @@ function getCells(content, paneId) {
 //---------------------------------------------------------
 // Attributes
 //---------------------------------------------------------
-function sortOnAttribute(a, b) {
-    var aAttr = a.eav.attribute;
-    var bAttr = b.eav.attribute;
-    if (aAttr < bAttr)
-        return -1;
-    if (aAttr > bAttr)
-        return 1;
-    return 0;
-}
-function attributesUI(entityId, paneId) {
-    var eavs = app_1.eve.find("entity eavs", { entity: entityId });
-    var items = [];
-    for (var _i = 0; _i < eavs.length; _i++) {
-        var eav = eavs[_i];
-        var entity_2 = eav.entity, attribute = eav.attribute, value = eav.value;
-        var found = app_1.eve.findOne("generated eav", { entity: entity_2, attribute: attribute, value: value });
-        var item = { eav: eav, isManual: !found };
-        if (found) {
-            item.sourceView = found.source;
-        }
-        items.push(item);
+app_1.handle("add entity attribute", function (changes, _a) {
+    var entity = _a.entity, attribute = _a.attribute, value = _a.value;
+    var success = handleAttributeDefinition(entity, attribute.trim(), value, changes);
+});
+app_1.handle("toggle add tile", function (changes, _a) {
+    var key = _a.key, entityId = _a.entityId;
+    var state = exports.uiState.widget.card[key] || { showAdd: false };
+    state.showAdd = !state.showAdd;
+    state.entityId = entityId;
+    state.key = key;
+    // in case you closed it with an adder selected
+    if (state.showAdd) {
+        state.adder = undefined;
     }
-    items.sort(sortOnAttribute);
-    var state = exports.uiState.widget.attributes[entityId] || {};
-    var ix = 0;
-    var len = items.length;
-    var tableChildren = [];
-    while (ix < len) {
-        var item = items[ix];
-        var group = { children: [] };
-        var subItem = item;
-        while (ix < len && subItem.eav.attribute === item.eav.attribute) {
-            var child = { c: "value", eav: subItem.eav, children: [] };
-            var valueUI = subItem;
-            var relatedSourceView = false;
-            valueUI.value = subItem.eav.value;
-            valueUI["submit"] = submitAttribute;
-            valueUI["eav"] = subItem.eav;
-            if (!subItem.isManual) {
-                child.c += " generated";
-                relatedSourceView = state.sourceView === subItem.sourceView;
-                valueUI.text = valueUI.value;
-                if (state.active && state.active.__id === subItem.eav.__id) {
-                    var query = app_1.eve.findOne("query to id", { id: subItem.sourceView }).query;
-                    child.style = "background: red;";
-                    valueUI.t = "input";
-                    valueUI.value = "= " + query;
-                    valueUI["query"] = valueUI.value;
-                    valueUI["sourceView"] = subItem.sourceView;
-                    valueUI.postRender = utils_1.autoFocus;
-                    valueUI.text = undefined;
-                    child.children.push(valueUI);
-                }
-                else if (relatedSourceView) {
-                    child.style = "background: red;";
-                    valueUI.text = "editing search...";
-                }
-                child["sourceView"] = subItem.sourceView;
-                child.click = setActiveAttribute;
-            }
-            else {
-                valueUI.t = "input";
-            }
-            var display = app_1.eve.findOne("display name", { id: valueUI.value });
-            if (display && !relatedSourceView) {
-                if (!state.active || state.active.__id !== subItem.eav.__id) {
-                    child.children.push({ c: "link", text: display.name, data: { paneId: paneId }, link: display.id, click: navigate, peek: true });
-                    child.click = setActiveAttribute;
-                    valueUI.t = "div";
-                }
-                else {
-                    valueUI.value = "= " + display.name;
-                    valueUI.postRender = utils_1.autoFocus;
-                    child.children.push(valueUI);
-                }
-            }
-            else {
-                child.children.push(valueUI);
-            }
-            if (valueUI.t === "input") {
-                valueUI.keydown = handleAttributesKey;
-            }
-            else {
-                child.children.push({ c: "spacer no-mouse" });
-            }
-            child.children.push({ c: "ion-android-close remove", eav: subItem.eav, sourceView: subItem.sourceView, query: valueUI["query"], click: removeSubItem });
-            group.children.push(child);
-            ix++;
-            subItem = items[ix];
+    exports.uiState.widget.card[key] = state;
+});
+app_1.handle("set tile adder", function (changes, _a) {
+    var key = _a.key, adder = _a.adder;
+    var state = exports.uiState.widget.card[key] || { showAdd: true, key: key };
+    state.adder = adder;
+    exports.uiState.widget.card[key] = state;
+});
+app_1.handle("set tile adder attribute", function (changes, _a) {
+    var key = _a.key, attribute = _a.attribute, value = _a.value, isActiveTileAttribute = _a.isActiveTileAttribute;
+    var state = exports.uiState.widget.card[key] || { showAdd: true, key: key };
+    if (!isActiveTileAttribute) {
+        state[attribute] = value.trim();
+    }
+    else {
+        state.activeTile[attribute] = value.trim();
+    }
+    exports.uiState.widget.card[key] = state;
+});
+app_1.handle("submit tile adder", function (changes, _a) {
+    var key = _a.key, node = _a.node;
+    var state = exports.uiState.widget.card[key] || { showAdd: true, key: key };
+    if (state.adder && state.adder.submit) {
+        state.adder.submit(state.adder, state, node);
+    }
+    exports.uiState.widget.card[key] = state;
+});
+app_1.handle("activate tile", function (changes, _a) {
+    var tileId = _a.tileId, cardId = _a.cardId;
+    var state = exports.uiState.widget.card[cardId] || { showAdd: false, key: cardId };
+    if (tileId && (!state.activeTile || state.activeTile.id !== tileId)) {
+        state.activeTile = { id: tileId };
+    }
+    else if (!tileId) {
+        state.activeTile = undefined;
+    }
+    exports.uiState.widget.card[cardId] = state;
+});
+function activateTile(event, elem) {
+    if (event.defaultPrevented)
+        return;
+    app_1.dispatch("activate tile", { tileId: elem.tileId, cardId: elem.cardId }).commit();
+}
+function submitActiveTile(event, elem) {
+    if (elem.source) {
+        // replace
+        app_1.dispatch("replace sourced tile", { key: elem.cardId, source: elem.source, attribute: elem.attribute, entityId: elem.entityId }).commit();
+    }
+    else {
+        // handle a list submit
+        app_1.dispatch("submit list tile", { cardId: elem.cardId, attribute: elem.attribute, entityId: elem.entityId, reverseEntityAndValue: elem.reverseEntityAndValue }).commit();
+    }
+    event.preventDefault();
+}
+function removeActiveTile(event, elem) {
+    if (elem.source) {
+        app_1.dispatch("remove sourced eav", { source: elem.source }).commit();
+    }
+    else {
+        console.error("Tried to remove a tile without a source. What do we do?");
+    }
+    event.preventDefault();
+}
+function tile(elem) {
+    var cardId = elem.cardId, tileId = elem.tileId, active = elem.active, attribute = elem.attribute, entityId = elem.entityId, source = elem.source, reverseEntityAndValue = elem.reverseEntityAndValue;
+    var klass = (elem.c || "") + " tile";
+    if (active) {
+        klass += " active";
+    }
+    elem.c = klass;
+    elem.children = [
+        { c: "tile-content-wrapper", children: elem.children },
+        { c: "edit ion-edit", click: activateTile, cardId: cardId, tileId: tileId, entityId: entityId, source: source },
+        { c: "controls", children: [
+                !elem.removeOnly ? { c: "ion-checkmark submit", click: submitActiveTile, cardId: cardId, attribute: attribute, entityId: entityId, source: source, reverseEntityAndValue: reverseEntityAndValue } : undefined,
+                !elem.submitOnly ? { c: "ion-backspace cancel", click: removeActiveTile, cardId: cardId, attribute: attribute, entityId: entityId, source: source } : undefined,
+            ] }
+    ];
+    return elem;
+}
+function isTileActive(cardId, tileId) {
+    var state = exports.uiState.widget.card[cardId];
+    return state && state.activeTile && state.activeTile.id === tileId;
+}
+app_1.handle("toggle active tile item", function (changes, _a) {
+    var cardId = _a.cardId, attribute = _a.attribute, id = _a.id;
+    var state = exports.uiState.widget.card[cardId] || { showAdd: true, key: cardId, activeTile: {} };
+    if (!state.activeTile[attribute]) {
+        state.activeTile[attribute] = {};
+    }
+    var cur = state.activeTile[attribute][id];
+    if (cur) {
+        delete state.activeTile[attribute][id];
+    }
+    else {
+        state.activeTile[attribute][id] = true;
+    }
+    exports.uiState.widget.card[cardId] = state;
+});
+app_1.handle("submit list tile", function (changes, _a) {
+    var cardId = _a.cardId, attribute = _a.attribute, entityId = _a.entityId, reverseEntityAndValue = _a.reverseEntityAndValue;
+    var state = exports.uiState.widget.card[cardId] || { activeTile: {} };
+    var _b = state.activeTile, itemsToRemove = _b.itemsToRemove, itemsToAdd = _b.itemsToAdd;
+    if (itemsToRemove) {
+        for (var source in itemsToRemove) {
+            changes.remove("sourced eav", { source: source });
         }
-        tableChildren.push({ id: entityId + "|" + paneId + "|" + item.eav.attribute, c: "attribute", children: [
-                { c: "attribute-name", text: item.eav.attribute },
-                group,
+    }
+    if (itemsToAdd) {
+        for (var _i = 0; _i < itemsToAdd.length; _i++) {
+            var value = itemsToAdd[_i];
+            if (value === "" || value === undefined)
+                continue;
+            if (!reverseEntityAndValue) {
+                changes.dispatch("add sourced eav", { entity: entityId, attribute: attribute, value: value.trim(), forceEntity: true });
+            }
+            else {
+                var cleaned = value.trim();
+                var entityValue = asEntity(cleaned);
+                if (!entityValue) {
+                    //create an entity with that name
+                    entityValue = utils_1.uuid();
+                    var pageId = utils_1.uuid();
+                    changes.dispatch("create page", { page: pageId, content: "" })
+                        .dispatch("create entity", { entity: entityValue, name: cleaned, page: pageId });
+                }
+                changes.dispatch("add sourced eav", { entity: entityValue, attribute: attribute, value: entityId });
+            }
+        }
+    }
+    changes.dispatch("activate tile", { cardId: cardId });
+});
+function toggleListTileItem(event, elem) {
+    app_1.dispatch("toggle active tile item", { cardId: elem.cardId, attribute: elem.storeAttribute, id: elem.storeId }).commit();
+    event.preventDefault();
+}
+app_1.handle("add active tile item", function (changes, _a) {
+    var cardId = _a.cardId, attribute = _a.attribute, id = _a.id, value = _a.value, tileId = _a.tileId;
+    var state = exports.uiState.widget.card[cardId] || { showAdd: true, key: cardId, activeTile: { id: tileId } };
+    if (!state.activeTile) {
+        state.activeTile = { id: tileId };
+    }
+    if (!state.activeTile[attribute]) {
+        state.activeTile[attribute] = [];
+    }
+    var cur = state.activeTile[attribute][id];
+    state.activeTile[attribute][id] = value;
+    exports.uiState.widget.card[cardId] = state;
+});
+function autosizeAndStoreListTileItem(event, elem) {
+    var node = event.currentTarget;
+    app_1.dispatch("add active tile item", { cardId: elem.cardId, attribute: elem.storeAttribute, tileId: elem.tileId, id: elem.storeId, value: node.value }).commit();
+    uitk.autosizeInput(node, elem);
+}
+function listTile(elem) {
+    var values = elem.values, data = elem.data, tileId = elem.tileId, attribute = elem.attribute, cardId = elem.cardId, entityId = elem.entityId, forceActive = elem.forceActive, reverseEntityAndValue = elem.reverseEntityAndValue, noProperty = elem.noProperty, _a = elem.rep, rep = _a === void 0 ? "value" : _a, _b = elem.c, klass = _b === void 0 ? "" : _b;
+    tileId = tileId || attribute;
+    var state = exports.uiState.widget.card[cardId] || {};
+    var active = forceActive || isTileActive(cardId, tileId);
+    var listChildren = [];
+    var max = 0;
+    for (var _i = 0; _i < values.length; _i++) {
+        var value = values[_i];
+        var current = reverseEntityAndValue ? value.eav.entity : value.eav.value;
+        if (uitk.resolveName(current) === "entity" && attribute === "is a")
+            continue;
+        var source = value.source;
+        var valueElem = { c: "value", data: data, text: current };
+        if (rep === "externalImage") {
+            valueElem.url = current;
+            valueElem.text = undefined;
+        }
+        var ui = uitk[rep](valueElem);
+        if (active) {
+            ui["cardId"] = cardId;
+            ui["storeAttribute"] = "itemsToRemove";
+            ui["storeId"] = source;
+            ui.click = toggleListTileItem;
+            if (state.activeTile.itemsToRemove && state.activeTile.itemsToRemove[source]) {
+                ui.c += " marked-to-remove";
+            }
+        }
+        listChildren.push(ui);
+    }
+    if (active) {
+        var added = (state.activeTile ? state.activeTile.itemsToAdd : false) || [];
+        var ix = 0;
+        for (var _c = 0; _c < added.length; _c++) {
+            var add = added[_c];
+            listChildren.push({ c: "value", children: [
+                    { t: "input", placeholder: "add", value: add, attribute: attribute, entityId: entityId, storeAttribute: "itemsToAdd", storeId: ix, cardId: cardId, input: autosizeAndStoreListTileItem, postRender: uitk.autosizeAndFocus, keydown: handleTileKeys, reverseEntityAndValue: reverseEntityAndValue }
+                ] });
+            ix++;
+        }
+        listChildren.push({ c: "value", children: [
+                { t: "input", placeholder: "add", value: "", attribute: attribute, entityId: entityId, storeAttribute: "itemsToAdd", storeId: ix, cardId: cardId, input: autosizeAndStoreListTileItem, postRender: ix === 0 ? uitk.autosizeAndFocus : uitk.autosizeInput, keydown: handleTileKeys, reverseEntityAndValue: reverseEntityAndValue }
             ] });
     }
-    tableChildren.push({ id: entityId + "|" + paneId + "|adder", c: "attribute adder", children: [
-            { t: "input", c: "attribute-name value", placeholder: "property", keydown: handleAttributesKey, input: setAdder, submit: submitAdder, field: "adderAttribute", entityId: entityId, value: state.adderAttribute },
-            { t: "input", c: "value", placeholder: "value", keydown: handleAttributesKey, input: setAdder, submit: submitAdder, field: "adderValue", entityId: entityId, value: state.adderValue },
-        ] });
-    return { c: "attributes", children: tableChildren };
+    var tileChildren = [];
+    var isIsA = attribute === "is a";
+    if (!noProperty) {
+        tileChildren.push({ c: "property", text: isIsA ? "tags" : attribute });
+    }
+    tileChildren.push({ c: "list", children: listChildren });
+    var size = isIsA ? "is a" : "full";
+    return tile({ c: klass + " " + size, size: size, cardId: cardId, data: data, tileId: tileId, active: active, attribute: attribute, entityId: entityId, reverseEntityAndValue: reverseEntityAndValue, submitOnly: true, children: tileChildren });
 }
+exports.listTile = listTile;
+function autosizeTextarea(node, elem) {
+    node.style.height = "1px";
+    node.style.height = 1 + node.scrollHeight + "px";
+}
+function autosizeAndFocusTextArea(node, elem) {
+    utils_1.autoFocus(node, elem);
+    autosizeTextarea(node, elem);
+}
+function storeActiveTileValue(elem, value) {
+    app_1.dispatch("set tile adder attribute", { key: elem.cardId, attribute: elem.storeAttribute, value: value, isActiveTileAttribute: true }).commit();
+}
+app_1.handle("replace sourced tile", function (changes, _a) {
+    var key = _a.key, attribute = _a.attribute, entityId = _a.entityId, source = _a.source;
+    var state = exports.uiState.widget.card[key] || { activeTile: {} };
+    var replaceValue = state.activeTile.replaceValue;
+    var sourced = app_1.eve.findOne("sourced eav", { source: source });
+    if (!sourced) {
+        console.error("Tried to modify a sourced eav that doesn't exist?");
+        return;
+    }
+    if (replaceValue !== undefined && sourced.value !== replaceValue.trim()) {
+        changes.remove("sourced eav", { source: source });
+        if (attribute === "description") {
+            replaceValue = "\"" + replaceValue + "\"";
+        }
+        changes.dispatch("add sourced eav", { entity: entityId, attribute: attribute, value: replaceValue, forceEntity: true });
+    }
+    changes.dispatch("activate tile", { cardId: key });
+});
+function handleTileKeys(event, elem) {
+    if (event.keyCode === utils_1.KEYS.ENTER) {
+        if (elem.source) {
+            app_1.dispatch("replace sourced tile", { key: elem.cardId, source: elem.source, attribute: elem.attribute, entityId: elem.entityId }).commit();
+        }
+        else {
+            app_1.dispatch("submit list tile", { cardId: elem.cardId, attribute: elem.attribute, entityId: elem.entityId, reverseEntityAndValue: elem.reverseEntityAndValue }).commit();
+        }
+        event.preventDefault();
+    }
+    else if (event.keyCode === utils_1.KEYS.ESC) {
+        app_1.dispatch("activate tile", { cardId: elem.cardId }).commit();
+    }
+}
+function autosizeAndStoreTextarea(event, elem) {
+    var node = event.currentTarget;
+    storeActiveTileValue(elem, node.value);
+    autosizeTextarea(node, elem);
+}
+function textTile(elem) {
+    var value = elem.value, data = elem.data, attribute = elem.attribute, cardId = elem.cardId, entityId = elem.entityId;
+    var tileId = value.source;
+    var source = value.source;
+    var state = exports.uiState.widget.card[cardId] || {};
+    var active = isTileActive(cardId, tileId);
+    var tileChildren = [];
+    if (attribute !== "description") {
+        tileChildren.push({ c: "property", text: attribute });
+    }
+    if (!active) {
+        tileChildren.push({ c: "value text", text: value.eav.value });
+    }
+    else {
+        tileChildren.push({ t: "textarea", c: "value text", source: source, attribute: attribute, storeAttribute: "replaceValue", cardId: cardId, entityId: entityId,
+            keydown: handleTileKeys, input: autosizeAndStoreTextarea, postRender: autosizeAndFocusTextArea, value: value.eav.value });
+    }
+    return tile({ c: "full", tileId: tileId, cardId: cardId, entityId: entityId, attribute: attribute, source: source, active: active, children: tileChildren });
+}
+function autosizeAndStoreInput(event, elem) {
+    var node = event.currentTarget;
+    storeActiveTileValue(elem, node.value);
+    uitk.autosizeInput(node, elem);
+}
+function valueTile(elem) {
+    var value = elem.value, data = elem.data, attribute = elem.attribute, cardId = elem.cardId, entityId = elem.entityId;
+    var tileId = attribute;
+    var source = value.source;
+    var state = exports.uiState.widget.card[cardId] || {};
+    var active = isTileActive(cardId, tileId);
+    var tileChildren = [];
+    tileChildren.push({ c: "property", text: attribute });
+    var ui;
+    var content = uitk.resolveName(value.eav.value);
+    if (!content)
+        content = value.eav.value;
+    if (!active) {
+        ui = uitk.value({ c: "value", data: data, text: value.eav.value });
+    }
+    else {
+        ui = { t: "input", c: "value", source: source, attribute: attribute, storeAttribute: "replaceValue", cardId: cardId, entityId: entityId, value: content, postRender: uitk.autosizeAndFocus,
+            input: autosizeAndStoreInput, keydown: handleTileKeys };
+    }
+    var max = Math.max(content.toString().length, 0);
+    tileChildren.push({ c: "value", children: [ui] });
+    var size;
+    if (max <= 8) {
+        size = "small";
+    }
+    else if (max <= 16) {
+        size = "medium";
+    }
+    else {
+        size = "full";
+    }
+    var klass = size;
+    if (!value.isManual) {
+        klass += " computed";
+    }
+    return tile({ c: klass, size: size, cardId: cardId, data: data, tileId: tileId, active: active, attribute: attribute, source: source, entityId: entityId, children: tileChildren });
+}
+function imageTile(elem) {
+    var values = elem.values, data = elem.data, attribute = elem.attribute, cardId = elem.cardId, entityId = elem.entityId;
+    var ui;
+    if (values.length > 1) {
+        elem.rep = "externalImage";
+        elem.noProperty = true;
+        elem.c = "image ";
+        ui = listTile(elem);
+    }
+    else {
+        var value = values[0];
+        var source = value.source;
+        var size = "full";
+        var klass = "image full";
+        var tileId = attribute;
+        var tileChildren = [{ t: "img", c: "image", src: "" + value.eav.value }];
+        var active = isTileActive(cardId, tileId);
+        ui = tile({ c: klass, size: size, cardId: cardId, data: data, tileId: tileId, active: active, attribute: attribute, source: source, entityId: entityId, children: tileChildren });
+    }
+    return ui;
+}
+function documentTile(elem) {
+    var value = elem.value, data = elem.data, attribute = elem.attribute, cardId = elem.cardId, entityId = elem.entityId;
+    var tileChildren = [];
+    var tileId = attribute;
+    var source = value.source;
+    var state = exports.uiState.widget.card[cardId] || {};
+    var active = isTileActive(cardId, tileId);
+    var size = "full";
+    var klass = "document full";
+    return tile({ c: klass, size: size, cardId: cardId, data: data, tileId: tileId, active: active, attribute: attribute, source: source, entityId: entityId, children: tileChildren });
+}
+function row(elem) {
+    elem.c = (elem.c || "") + " row flex-row";
+    return elem;
+}
+function getEAVInfo(eav) {
+    var entity = eav.entity, attribute = eav.attribute, value = eav.value;
+    var found = app_1.eve.findOne("generated eav", { entity: entity, attribute: attribute, value: value });
+    var sourceId = app_1.eve.findOne("sourced eav", { entity: entity, attribute: attribute, value: value });
+    var item = { eav: eav, isManual: !found };
+    if (found) {
+        item.sourceView = found.source;
+        item.source = found.source;
+    }
+    else if (sourceId) {
+        item.source = sourceId.source;
+    }
+    return item;
+}
+function entityTilesUI(entityId, paneId, cardId) {
+    var eavs = app_1.eve.find("entity eavs", { entity: entityId });
+    var items = {};
+    var attrs = [];
+    for (var _i = 0; _i < eavs.length; _i++) {
+        var eav = eavs[_i];
+        var attribute = eav.attribute;
+        var info = getEAVInfo(eav);
+        if (!items[attribute]) {
+            items[attribute] = [];
+            attrs.push(attribute);
+        }
+        items[attribute].push(info);
+    }
+    var tiles = { "small": [], "medium": [], "full": [], "is a": [] };
+    var rows = [];
+    var data = { paneId: paneId, entityId: entityId };
+    if (items["image"]) {
+        var values = items["image"];
+        var tile_1 = imageTile({ values: values, data: data, cardId: cardId, entityId: entityId, attribute: "image" });
+        rows.push(row({ children: [tile_1] }));
+        delete items["image"];
+    }
+    if (items["description"]) {
+        var values = items["description"];
+        for (var _a = 0; _a < values.length; _a++) {
+            var value = values[_a];
+            var tile_2 = textTile({ value: value, data: data, cardId: cardId, entityId: entityId, attribute: "description" });
+            rows.push(row({ children: [tile_2] }));
+        }
+        delete items["description"];
+    }
+    if (app_1.eve.findOne("collection", { collection: entityId }) || app_1.eve.findOne("entity eavs", { entity: entityId, attribute: "is a", value: asEntity("collection") })) {
+        var listChildren = [];
+        var entities = app_1.eve.find("entity eavs", { attribute: "is a", value: entityId });
+        var values = entities.map(getEAVInfo);
+        var tile_3 = listTile({ values: values, data: data, cardId: cardId, entityId: entityId, attribute: "is a", reverseEntityAndValue: true, tileId: "_collectionItems", noProperty: true });
+        rows.push(row({ children: [tile_3] }));
+    }
+    var tilesToPlace = 0;
+    for (var _b = 0; _b < attrs.length; _b++) {
+        var attribute = attrs[_b];
+        var values = items[attribute];
+        if (!values)
+            continue;
+        var newTile = void 0;
+        if (values.length > 1 || attribute === "is a") {
+            newTile = listTile({ values: values, data: data, attribute: attribute, cardId: cardId, entityId: entityId });
+        }
+        else {
+            newTile = valueTile({ value: values[0], data: data, attribute: attribute, cardId: cardId, entityId: entityId });
+        }
+        var size = newTile.size;
+        tiles[size].push(newTile);
+        if (size !== "is a")
+            tilesToPlace++;
+    }
+    var optionIx = 0;
+    while (tilesToPlace > 0) {
+        var rowChildren = [];
+        var iter = 0;
+        while (iter < 5 && !rowChildren.length) {
+            if (optionIx === 0 && tiles["full"].length) {
+                rowChildren.push(tiles["full"].pop());
+                break;
+            }
+            if (optionIx === 1 && tiles["medium"].length > 1) {
+                rowChildren.push(tiles["medium"].pop());
+                rowChildren.push(tiles["medium"].pop());
+                break;
+            }
+            if (optionIx === 2 && tiles["medium"].length && tiles["small"].length >= 1) {
+                rowChildren.push(tiles["medium"].pop());
+                rowChildren.push(tiles["small"].pop());
+                break;
+            }
+            if (optionIx === 3 && tiles["small"].length >= 3) {
+                rowChildren.push(tiles["small"].pop());
+                rowChildren.push(tiles["small"].pop());
+                rowChildren.push(tiles["small"].pop());
+                break;
+            }
+            if (optionIx === 4 && tiles["medium"].length) {
+                rowChildren.push(tiles["medium"].pop());
+                break;
+            }
+            if (optionIx > 4)
+                optionIx = 0;
+            else
+                optionIx++;
+            iter++;
+        }
+        // any smalls leftover
+        if (!rowChildren.length) {
+            while (tiles["small"].length) {
+                rowChildren.push(tiles["small"].pop());
+            }
+        }
+        tilesToPlace -= rowChildren.length;
+        rows.push({ c: "flex-row row", children: rowChildren });
+    }
+    if (tiles["is a"]) {
+        rows.push({ c: "flex-row row", children: [tiles["is a"][0]] });
+    }
+    var state = exports.uiState.widget.attributes[entityId] || {};
+    return { c: "tiles", children: rows };
+}
+exports.entityTilesUI = entityTilesUI;
 function attributesUIAutocompleteOptions(isEntity, parsed, text, params, entityId) {
     var options = [];
     //there are two possible things either we're creating a page
@@ -1672,29 +2260,32 @@ function submitAttribute(event, elem) {
 // Wiki Widgets
 //---------------------------------------------------------
 function searchInput(paneId, value) {
-    var name = value;
-    var display = app_1.eve.findOne("display name", { id: value });
+    var state = exports.uiState.widget.search[paneId] || { focused: false, plan: false };
+    var name = state.value;
+    if (!state.value)
+        state.value = name;
+    var display = app_1.eve.findOne("display name", { id: name });
     if (display)
         name = display.name;
-    var state = exports.uiState.widget.search[paneId] || { focused: false, plan: false };
     return {
         c: "flex-grow wiki-search-wrapper",
         children: [
+            { c: "controls", children: [
+                    // {c: `ion-ios-arrow-${state.plan ? 'up' : 'down'} plan`, click: toggleSearchPlan, paneId},
+                    // while technically a button, we don't need to do anything as clicking it will blur the editor
+                    // which will execute the search
+                    { c: "ion-android-search visible", paneId: paneId }
+                ] },
             codeMirrorElement({
                 c: "flex-grow wiki-search-input " + (state.focused ? "selected" : ""),
                 paneId: paneId,
                 value: name,
                 focus: focusSearch,
                 blur: setSearch,
-                // change: updateSearch,
+                cursorPosition: "end",
+                change: updateSearch,
                 shortcuts: { "Enter": setSearch }
             }),
-            { c: "controls", children: [
-                    { c: "ion-ios-arrow-" + (state.plan ? 'up' : 'down') + " plan", click: toggleSearchPlan, paneId: paneId },
-                    // while technically a button, we don't need to do anything as clicking it will blur the editor
-                    // which will execute the search
-                    { c: "ion-android-search visible", paneId: paneId }
-                ] },
         ]
     };
 }
@@ -1704,16 +2295,24 @@ function focusSearch(event, elem) {
     app_1.dispatch("ui focus search", elem).commit();
 }
 function setSearch(event, elem) {
-    var value = event.value;
+    var state = exports.uiState.widget.search[elem.paneId] || { value: "" };
+    var value = event.value !== undefined ? event.value : state.value;
     var pane = app_1.eve.findOne("ui pane", { pane: elem.paneId });
     if (!pane || pane.contains !== event.value) {
-        app_1.dispatch("insert query", { query: value })
-            .dispatch("ui set search", { paneId: elem.paneId, value: event.value })
-            .commit();
+        var _a = dispatchSearchSetAttributes(value), chain = _a.chain, isSetSearch = _a.isSetSearch;
+        if (isSetSearch) {
+            chain.dispatch("ui update search", { paneId: elem.paneId, value: pane.contains });
+            chain.commit();
+        }
+        else {
+            chain.dispatch("insert query", { query: value })
+                .dispatch("set pane", { paneId: elem.paneId, contains: value })
+                .commit();
+        }
     }
 }
 function updateSearch(event, elem) {
-    app_1.dispatch("ui update search", elem).commit();
+    app_1.dispatch("ui update search", { paneId: elem.paneId, value: event.value }).commit();
 }
 function toggleSearchPlan(event, elem) {
     app_1.dispatch("ui toggle search plan", elem).commit();
@@ -1721,6 +2320,12 @@ function toggleSearchPlan(event, elem) {
 ;
 function codeMirrorElement(elem) {
     elem.postRender = codeMirrorPostRender(elem.postRender);
+    elem["cmChange"] = elem.change;
+    elem["cmBlur"] = elem.blur;
+    elem["cmFocus"] = elem.focus;
+    elem.change = undefined;
+    elem.blur = undefined;
+    elem.focus = undefined;
     return elem;
 }
 exports.codeMirrorElement = codeMirrorElement;
@@ -1751,17 +2356,21 @@ function codeMirrorPostRender(postRender) {
                 mode: elem.mode || "text",
                 extraKeys: extraKeys
             });
-            if (elem.change)
-                cm.on("change", handleCMEvent(elem.change, elem));
-            if (elem.blur)
-                cm.on("blur", handleCMEvent(elem.blur, elem));
-            if (elem.focus)
-                cm.on("focus", handleCMEvent(elem.focus, elem));
+            if (elem["cmChange"])
+                cm.on("change", handleCMEvent(elem["cmChange"], elem));
+            if (elem["cmBlur"])
+                cm.on("blur", handleCMEvent(elem["cmBlur"], elem));
+            if (elem["cmFocus"])
+                cm.on("focus", handleCMEvent(elem["cmFocus"], elem));
             if (elem.autofocus)
                 cm.focus();
         }
-        if (cm.getDoc().getValue() !== elem.value)
+        if (cm.getDoc().getValue() !== elem.value) {
             cm.setValue(elem.value || "");
+            if (elem["cursorPosition"] === "end") {
+                cm.setCursor(100000);
+            }
+        }
         if (postRender)
             postRender(node, elem);
     };
@@ -1804,9 +2413,9 @@ function prepareEntity(results, params) {
     var entities = getEntitiesFromResults(results, { fields: params.field ? [params.field] : undefined });
     var elems = [];
     for (var _i = 0; _i < entities.length; _i++) {
-        var entity_3 = entities[_i];
+        var entity = entities[_i];
         var elem_1 = utils_1.copy(params);
-        elem_1.entity = entity_3;
+        elem_1.entity = entity;
         elems.push(elem_1);
     }
     if (elems.length === 1)
@@ -1853,8 +2462,8 @@ var _prepare = {
         }
         var elems = [];
         for (var _i = 0; _i < results.length; _i++) {
-            var row = results[_i];
-            elems.push({ text: row[field], data: params.data });
+            var row_1 = results[_i];
+            elems.push({ text: row_1[field], data: params.data });
         }
         return elems;
     },
@@ -1874,16 +2483,55 @@ var _prepare = {
         }
         var values = [];
         for (var _i = 0; _i < results.length; _i++) {
-            var row = results[_i];
-            values.push(row[field]);
+            var row_2 = results[_i];
+            values.push(row_2[field]);
         }
         return { values: values, data: params.data };
+    },
+    entity: function (results, params) {
+        var entities = [];
+        var firstResult = results[0];
+        var fields = Object.keys(firstResult).filter(function (field) {
+            return !!asEntity(firstResult[field]);
+        });
+        for (var _i = 0; _i < results.length; _i++) {
+            var result = results[_i];
+            for (var _a = 0; _a < fields.length; _a++) {
+                var field = fields[_a];
+                var entityId = result[field];
+                var paneId = params["paneId"];
+                var editor = prepareCardEditor(entityId, paneId);
+                entities.push({ entity: result[field], data: params, editor: editor });
+            }
+        }
+        return entities;
     },
     error: function (results, params) {
         return { text: params["message"] };
     },
+    mappedTable: function (results, params) {
+        var paneId = params.paneId || params.data && params.data.paneId;
+        var key = paneId + "|" + params.search;
+        var state = exports.uiState.widget.table[key];
+        if (!state) {
+            state = exports.uiState.widget.table[key] = { sortField: undefined, sortDirection: 1, adder: {} };
+        }
+        params["sortable"] = true;
+        params["rows"] = results;
+        params["state"] = state;
+        return params;
+    },
     table: function (results, params) {
-        return { rows: results, data: params.data };
+        var paneId = params.paneId || params.data && params.data.paneId;
+        var key = paneId + "|" + params.search;
+        var state = exports.uiState.widget.table[key];
+        if (!state) {
+            state = exports.uiState.widget.table[key] = { sortField: undefined, sortDirection: 1, adder: {} };
+        }
+        params["rows"] = results;
+        params["state"] = state;
+        return params;
+        //return {rows: results, fields, state, groups: groupings, sortable: true, data: params.data};
     },
     directory: function (results, params) {
         var entities = getEntitiesFromResults(results, { fields: params.field ? [params.field] : undefined });
@@ -1914,36 +2562,40 @@ var _prepare = {
         return { childInfo: childInfo, rep: rep, click: activateCell, cell: params["cell"] };
     },
 };
-function represent(search, rep, results, params) {
-    // console.log("repping:", results, " as", rep, " with params ", params);
+function represent(search, rep, results, params, wrapEach) {
     if (rep in _prepare) {
-        var embedParamSets = _prepare[rep](results.results, params);
+        var embedParamSets = _prepare[rep](results && results.results, params);
         var isArray = embedParamSets && embedParamSets.constructor === Array;
-        try {
-            if (!embedParamSets || isArray && embedParamSets.length === 0) {
-                return uitk.error({ text: search + " as " + rep });
-            }
-            else if (embedParamSets.constructor === Array) {
-                var wrapper = { c: "flex-column", children: [] };
-                for (var _i = 0; _i < embedParamSets.length; _i++) {
-                    var embedParams = embedParamSets[_i];
-                    embedParams["data"] = embedParams["data"] || params;
-                    wrapper.children.push(uitk[rep](embedParams));
-                }
-                return wrapper;
-            }
-            else {
-                var embedParams = embedParamSets;
+        // try {
+        if (!embedParamSets || isArray && embedParamSets.length === 0) {
+            return uitk.error({ text: search + " as " + rep });
+        }
+        else if (embedParamSets.constructor === Array) {
+            var wrapper = { c: "flex-column", children: [] };
+            var ix = 0;
+            for (var _i = 0; _i < embedParamSets.length; _i++) {
+                var embedParams = embedParamSets[_i];
                 embedParams["data"] = embedParams["data"] || params;
-                return uitk[rep](embedParams);
+                if (wrapEach)
+                    wrapper.children.push(wrapEach(uitk[rep](embedParams), ix++));
+                else
+                    wrapper.children.push(uitk[rep](embedParams));
             }
+            return wrapper;
         }
-        catch (err) {
-            console.error("REPRESENTATION ERROR");
-            console.error({ search: search, rep: rep, results: results, params: params });
-            console.error(err);
-            return uitk.error({ text: "Failed to embed as " + (params["childRep"] || rep) });
+        else {
+            var embedParams = embedParamSets;
+            embedParams["data"] = embedParams["data"] || params;
+            if (wrapEach)
+                return { c: "flex-column", children: [wrapEach(uitk[rep](embedParams))] };
+            else
+                return { c: "flex-column", children: [uitk[rep](embedParams)] };
         }
+    }
+    else {
+        console.error("REPRESENTATION ERROR");
+        console.error({ search: search, rep: rep, results: results, params: params });
+        return uitk.error({ text: "Unknown representation " + (params["childRep"] || rep) });
     }
 }
 var historyState = window.history.state;
@@ -1952,8 +2604,8 @@ window.addEventListener("popstate", function (evt) {
     var popout = app_1.eve.findOne("ui pane", { kind: PANE.POPOUT });
     if (popout && popoutHistory.length) {
         window.history.pushState(historyState, null, historyURL);
-        var search_1 = popoutHistory.pop();
-        app_1.dispatch("ui set search", { paneId: popout.pane, value: search_1, peek: true, popState: true }).commit();
+        var _a = popoutHistory.pop(), rep = _a.rep, contains_1 = _a.contains, params = _a.params, x = _a.x, y = _a.y;
+        app_1.dispatch("set popout", { parentId: "p1", rep: rep, contains: contains_1, params: params, x: x, y: y, popState: true }).commit(); // @TODO: make "p1" a constant
         return;
     }
     else if (evt.state && evt.state.root) {
@@ -1962,10 +2614,10 @@ window.addEventListener("popstate", function (evt) {
     }
     historyState = evt.state;
     historyURL = utils_1.location();
-    var _a = evt.state || {}, _b = _a.paneId, paneId = _b === void 0 ? undefined : _b, _c = _a.contains, contains = _c === void 0 ? undefined : _c;
+    var _b = evt.state || {}, _c = _b.paneId, paneId = _c === void 0 ? undefined : _c, _d = _b.contains, contains = _d === void 0 ? undefined : _d;
     if (paneId === undefined || contains === undefined)
         return;
-    app_1.dispatch("ui set search", { paneId: paneId, value: contains, popState: true }).commit();
+    app_1.dispatch("set pane", { paneId: paneId, contains: contains, popState: true }).commit();
 });
 // Prevent backspace from going back
 window.addEventListener("keydown", function (event) {

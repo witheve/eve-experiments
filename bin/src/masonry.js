@@ -79,7 +79,7 @@ function masonry(elem) {
         if (!layout.grouped) {
             for (var ix_1 = tileIx; ix_1 < tileIx + count; ix_1++) {
                 var tile = children[ix_1];
-                tile.c = "tile " + (tile.c || "") + " " + (layout.c || "");
+                tile.c = "directory-tile " + (tile.c || "") + " " + (layout.c || "");
                 if (styles)
                     tile.c += " " + styles[tileIx % styles.length];
                 if (layout.format)
@@ -95,7 +95,7 @@ function masonry(elem) {
                 var group = { c: "group " + (layout.c || ""), layout: layout, size: layout.size * layout.grouped, children: [] };
                 for (var partIx = 0; partIx < layout.grouped && added < count; partIx++) {
                     var tile = children[ix_2 + partIx];
-                    tile.c = "tile " + (tile.c || "") + " " + (layout.c || "");
+                    tile.c = "directory-tile " + (tile.c || "") + " " + (layout.c || "");
                     if (styles)
                         tile.c += " " + styles[(tileIx + partIx) % styles.length];
                     if (layout.format)

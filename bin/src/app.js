@@ -141,6 +141,9 @@ function dispatch(event, info, dispatchInfo) {
     return result;
 }
 exports.dispatch = dispatch;
+// No-op dispatch to trigger a rerender or start a chain.
+handle("rerender", function (changes) {
+});
 //---------------------------------------------------------
 // State
 //---------------------------------------------------------

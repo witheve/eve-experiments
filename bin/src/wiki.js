@@ -22,8 +22,8 @@ app.init("wiki", function () {
     var mainPane = app.eve.findOne("ui pane", { pane: "p1" });
     var path = utils_1.location();
     var _a = path.split("/"), _ = _a[0], kind = _a[1], _b = _a[2], raw = _b === void 0 ? "" : _b;
-    var content = utils_1.deslugify(raw);
-    var cur = app.dispatch("ui set search", { paneId: mainPane.pane, value: content });
+    var content = utils_1.deslugify(raw) || "home";
+    var cur = app.dispatch("set pane", { paneId: mainPane.pane, contains: content });
     if (content && !app.eve.findOne("query to id", { query: content })) {
         cur.dispatch("insert query", { query: content });
     }
@@ -33,13 +33,11 @@ window.addEventListener("hashchange", function () {
     var mainPane = app.eve.findOne("ui pane", { pane: "p1" });
     var path = utils_1.location();
     var _a = path.split("/"), _ = _a[0], kind = _a[1], _b = _a[2], raw = _b === void 0 ? "" : _b;
-    var content = utils_1.deslugify(raw);
-    var displays = app.eve.find("display name", { name: content });
-    if (displays.length === 1)
-        content = displays[0].id;
+    var content = utils_1.deslugify(raw) || "home";
+    content = ui.asEntity(content) || content;
     if (mainPane.contains === content)
         return;
-    var cur = app.dispatch("ui set search", { paneId: mainPane.pane, value: content });
+    var cur = app.dispatch("set pane", { paneId: mainPane.pane, contains: content });
     if (content && !app.eve.findOne("query to id", { query: content })) {
         cur.dispatch("insert query", { query: content });
     }

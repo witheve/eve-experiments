@@ -144,10 +144,10 @@ var Renderer = (function () {
             if (cur.colspan !== prev.colspan)
                 div.colSpan = cur.colspan;
             if (cur.placeholder !== prev.placeholder)
-                div.placeholder = cur.placeholder;
+                div.setAttribute("placeholder", cur.placeholder);
             if (cur.selected !== prev.selected)
                 div.selected = cur.selected;
-            if (cur.value !== prev.value)
+            if (cur.value !== prev.value && div.value !== cur.value)
                 div.value = cur.value;
             if (cur.t === "input" && cur.type !== prev.type)
                 div.type = cur.type;
