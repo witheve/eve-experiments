@@ -366,7 +366,7 @@ function collectionTileAdder(elem) {
         ] });
     var size = "full";
     var tileChildren = [];
-    tileChildren.push({ t: "input", c: "property", placeholder: "" + pluralize(resolveName(entityId), 2), attribute: "collectionProperty", value: state.collectionProperty, input: trackPropertyAdderInput, key: cardId });
+    tileChildren.push({ t: "input", c: "property", placeholder: "collection name", attribute: "collectionProperty", value: state.collectionProperty, input: trackPropertyAdderInput, key: cardId });
     tileChildren.push({ c: "list", children: listChildren });
     return { c: "property-adder collection-adder", children: [
             { children: [
@@ -423,6 +423,22 @@ function submitImage(adder, state, node) {
     state.imageValue = undefined;
     chain.dispatch("toggle add tile", { key: state.key }).commit();
 }
+function comingSoonAdderUI(elem) {
+    var entityId = elem.entityId, key = elem.key;
+    var state = ui_1.uiState.widget.card[key] || {};
+    return { c: "property-adder", children: [
+            { children: [
+                    { c: "tile small", children: [
+                            { c: "tile-content-wrapper", children: [
+                                    { text: "This tile type is coming soon." }
+                                ] },
+                            { c: "controls flex-row", children: [
+                                    { c: "ion-close cancel", click: setTileAdder, key: key },
+                                ] }
+                        ] }
+                ] }
+        ] };
+}
 function tileAdder(elem) {
     var entityId = elem.entityId, key = elem.key;
     var state = ui_1.uiState.widget.card[key] || {};
@@ -434,8 +450,8 @@ function tileAdder(elem) {
             { name: "Description", icon: "ion-drag", ui: descriptionAdderUI, submit: submitDescription },
             { name: "Collection", klass: "collection", icon: "ion-ios-list-outline", ui: collectionAdderUI, submit: submitCollection },
             { name: "Image", icon: "ion-image", ui: imageAdderUI, submit: submitImage },
-            { name: "Document", icon: "ion-document" },
-            { name: "Computed", icon: "ion-calculator" },
+            { name: "Document", icon: "ion-document", ui: comingSoonAdderUI },
+            { name: "Computed", icon: "ion-calculator", ui: comingSoonAdderUI },
         ];
         var count = 0;
         var curRow = { c: "row flex-row", children: [] };

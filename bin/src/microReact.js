@@ -161,6 +161,8 @@ var Renderer = (function () {
                 div.setAttribute("href", cur.href);
             if (cur.src !== prev.src)
                 div.setAttribute("src", cur.src);
+            if (cur.target !== prev.target)
+                div.setAttribute("target", cur.target);
             if (cur.data !== prev.data)
                 div.setAttribute("data", cur.data);
             if (cur.download !== prev.download)
@@ -425,6 +427,7 @@ var Renderer = (function () {
                 && curA.draggable === curB.draggable
                 && curA.contentEditable === curB.contentEditable
                 && curA.value === curB.value
+                && curA.target === curB.target
                 && curA.type === curB.type
                 && curA.checked === curB.checked
                 && curA.text === curB.text

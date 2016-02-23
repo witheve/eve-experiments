@@ -418,7 +418,7 @@ app_1.handle("handle setAttribute in a search", function (changes, _a) {
             changes.remove("sourced eav", { entity: entity, attribute: attribute });
         }
     }
-    changes.merge(app_1.dispatch("add sourced eav", { entity: entity, attribute: attribute, value: value }));
+    changes.merge(app_1.dispatch("add sourced eav", { entity: entity, attribute: attribute, value: value, forceEntity: true }));
 });
 function dispatchSearchSetAttributes(query, chain) {
     if (!chain) {
@@ -428,7 +428,6 @@ function dispatchSearchSetAttributes(query, chain) {
     var topParse = parsed[0];
     var isSetSearch = false;
     if (topParse.intent === NLQueryParser_1.Intents.INSERT) {
-        console.log(topParse.context);
         // debugger;
         var attributes = [];
         for (var _i = 0, _a = topParse.inserts; _i < _a.length; _i++) {
@@ -437,8 +436,26 @@ function dispatchSearchSetAttributes(query, chain) {
             // or if we're just adding a new eav for it.
             var replace = true;
             var entity = insert.entity.entity.id;
-            var attribute = insert.attribute.attribute.displayName;
-            var value;
+            var attribute = void 0;
+            if (insert.attribute.attribute) {
+                attribute = insert.attribute.attribute.displayName;
+            }
+            else {
+                attribute = insert.attribute.name;
+            }
+            var value = void 0;
+            if (insert.value.type === NLQueryParser_1.NodeTypes.ENTITY) {
+                var localValue = insert.value;
+                value = localValue.entity.id;
+            }
+            else if (insert.value.type === NLQueryParser_1.NodeTypes.NUMBER || insert.value.type === NLQueryParser_1.NodeTypes.STRING || insert.value.type === undefined) {
+                var localValue = insert.value;
+                value = localValue.name;
+            }
+            if (value === undefined)
+                continue;
+            chain.dispatch("handle setAttribute in a search", { entity: entity, attribute: attribute, value: value, replace: replace });
+            attributes.push("" + attribute);
         }
         query = attributes.join(" and ");
         isSetSearch = true;
@@ -534,9 +551,28 @@ function root() {
                 exports.uiState.prompt.prompt()
             ] });
     }
+    if (!localStorage["hideBanner"]) {
+        panes.unshift({ c: "banner", children: [
+                { c: "content", children: [
+                        { text: "This is a preview release of Eve meant for " },
+                        { t: "a", c: "link", href: "https://groups.google.com/forum/#!forum/eve-talk", text: "feedback" },
+                        { text: ". We're shooting for quality over quantity, so please don't post this to HN, Reddit, etc, but feel free to share it with friends." },
+                    ] },
+                { c: "flex-grow spacer" },
+                { t: "button", c: "ion-close", click: hideBanner }
+            ] });
+    }
+    panes.unshift({ c: "feedback-bar", children: [
+            { t: "a", target: "_blank", href: "https://github.com/witheve/Eve/issues", text: "bugs" },
+            { t: "a", target: "_blank", href: "https://groups.google.com/forum/#!forum/eve-talk", text: "suggestions" },
+            { t: "a", target: "_blank", href: "https://groups.google.com/forum/#!forum/eve-talk", text: "discussion" },
+        ] });
     return { c: "wiki-root", id: "root", children: panes, click: removePopup };
 }
 exports.root = root;
+function hideBanner(event, elem) {
+    localStorage["hideBanner"] = true;
+}
 // @TODO: Add search functionality + Pane Chrome
 var paneChrome = (_a = {},
     _a[PANE.FULL] = function (paneId, entityId) { return ({
@@ -2279,6 +2315,7 @@ function searchInput(paneId, value) {
             codeMirrorElement({
                 c: "flex-grow wiki-search-input " + (state.focused ? "selected" : ""),
                 paneId: paneId,
+                autoFocus: true,
                 value: name,
                 focus: focusSearch,
                 blur: setSearch,
@@ -2362,7 +2399,7 @@ function codeMirrorPostRender(postRender) {
                 cm.on("blur", handleCMEvent(elem["cmBlur"], elem));
             if (elem["cmFocus"])
                 cm.on("focus", handleCMEvent(elem["cmFocus"], elem));
-            if (elem.autofocus)
+            if (elem.autoFocus)
                 cm.focus();
         }
         if (cm.getDoc().getValue() !== elem.value) {
