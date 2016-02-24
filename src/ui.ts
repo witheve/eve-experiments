@@ -100,7 +100,7 @@ function inferRepresentation(search:string|number, baseParams:{} = {}):{rep:stri
 }
 
 function staticOrMappedTable(search:string, params) {
-  let parsed = nlparse(search);
+  let parsed = safeNLParse(search);
   let topParse = parsed[0];
   params.rep = "table";
   params.search = search;
@@ -108,9 +108,9 @@ function staticOrMappedTable(search:string, params) {
   params.fields = topParse.query.projects[0].fields.map((field) => field.name);
   params.groups = topParse.context.groupings.map((group) => group.name);
   //params.fields = uitk.getFields({example: results[0], blacklist: ["__id"]});
-  
-  if(!topParse) return params;
-  
+
+  if(!topParse || topParse.intent !== Intents.QUERY) return params;
+
   // Must not contain any primitive relations
   let editable = true;
   let subject;
@@ -178,6 +178,16 @@ function staticOrMappedTable(search:string, params) {
   }
 
   return params;
+}
+
+function safeNLParse(query):any[] {
+  try {
+    return nlparse(query);
+  } catch(e) {
+    console.error("NLParse error");
+    console.error(e);
+    return [{intent: Intents.NORESULT, context: {}, query: {}, projects: {}}];
+  }
 }
 
 //---------------------------------------------------------
@@ -383,7 +393,7 @@ appHandle("create query", (changes:Diff, {id, content}) => {
 
 appHandle("insert query", (changes:Diff, {query}) => {
   query = query.trim().toLowerCase();
-  let parsed = nlparse(query);
+  let parsed = safeNLParse(query);
   let topParse = parsed[0];
   if(eve.findOne("query to id", {query})) return;
   if(topParse.intent === Intents.QUERY) {
@@ -419,7 +429,7 @@ function dispatchSearchSetAttributes(query, chain?) {
   if(!chain) {
     chain = dispatch();
   }
-  let parsed = nlparse(query);
+  let parsed = safeNLParse(query);
   let topParse = parsed[0];
   let isSetSearch = false;
   if(topParse.intent === Intents.INSERT) {
@@ -620,6 +630,7 @@ function loadFromFile(event:Event, elem) {
   let reader = new FileReader();
   reader.onload = function(event:any) {
     let serialized = event.target.result;
+    eve.deleteDB();
     eve.load(serialized);
     dispatch("toggle prompt", {prompt: loadedPrompt, open: true}).commit();
   };
@@ -650,13 +661,15 @@ function nukeDatabase() {
 
 function savePrompt():Element {
   let serialized = localStorage[eveLocalStorageKey];
+  let blob = new Blob([serialized], {type: "application/json"});
+  let url = URL.createObjectURL(blob);
   return {c: "modal-prompt save-prompt", children: [
     {t: "header", c: "flex-row", children: [
       {t: "h2", text: "Save DB"},
       {c: "flex-grow"},
       {c: "controls", children: [{c: "ion-close-round", click: closePrompt}]}
     ]},
-    {t: "a", href: "data:application/octet-stream;charset=utf-16le;base64," + btoa(serialized), download: "save.evedb", text: "save to file"}
+    {t: "a", href: url, download: "save.evedb", text: "save to file"}
   ]};
 }
 
@@ -702,7 +715,7 @@ export function pane(paneId:string):Element {
   let content;
   let contentType = "invalid";
   if(contains.length === 0 || entityId) contentType = "entity";
-  else if(eve.findOne("query to id", {query: contains})) contentType = "search";
+  else if(eve.findOne("query to id", {query: contains.trim().toLowerCase()})) contentType = "search";
 
   if(params.rep || rep) {
     content = represent(contains, params.rep || rep, results, params, (params.unwrapped ? undefined : (elem, ix?) => uitk.card({id: `${paneId}|${contains}|${ix === undefined ? "" : ix}`, children: [elem]})));
@@ -901,8 +914,12 @@ function getCellParams(content, rawParams) {
   } else {
     if(params["rep"]) return params;
 
-    let parsed = nlparse(content);
+    let parsed = safeNLParse(content);
     let currentParse = parsed[0];
+    if(currentParse.intent === Intents.NORESULT) {
+      params["rep"] = "error";
+      return params;
+    }
     let context = currentParse.context;
     let hasCollections = context.collections.length;
     let field;
@@ -1041,7 +1058,7 @@ function autocompleterOptions(entityId, paneId, cell) {
   let parsed = [];
   if(text !== "") {
     try {
-      parsed = nlparse(text); // @TODO: this should come from the NLP parser once it's hooked up.
+      parsed = safeNLParse(text); // @TODO: this should come from the NLP parser once it's hooked up.
     } catch(e) {
 
     }
@@ -1372,7 +1389,7 @@ function interpretAttributeValue(value): {isValue: boolean, parse?:any, value?:a
     if(entityId) {
       return {isValue: true, value: entityId};
     }
-    let parsed = nlparse(cleaned);
+    let parsed = safeNLParse(cleaned);
     return {isValue: false, parse: parsed, value: cleaned};
   } else {
     return {isValue: true, value: coerceInput(cleaned)};
@@ -1704,6 +1721,7 @@ appHandle("toggle add tile", (changes:Diff, {key, entityId}) => {
   state.showAdd = !state.showAdd;
   state.entityId = entityId;
   state.key = key;
+  state.activeTile = undefined;
   // in case you closed it with an adder selected
   if(state.showAdd) {
     state.adder = undefined;
