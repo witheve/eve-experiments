@@ -89,18 +89,15 @@ function parse(queryString, lastParse) {
         else if (context.maybeAttributes.length > 0) {
             intent = Intents.MOREINFO;
         }
-        else if (context.relationships.length === 0) {
-            if (context.fxns.length === 0 && context.attributes.length > 0 && context.found.length > 1) {
-                intent = Intents.NORESULT;
-            }
-            else {
-                intent = Intents.QUERY;
-            }
+        else if (context.found.length > 0 &&
+            context.attributes.filter(function (a) { return a.attribute.refs === undefined && !a.parent.hasProperty(Properties.ARGUMENT); }).length > 0) {
+            intent = Intents.NORESULT;
         }
         else {
             intent = Intents.QUERY;
         }
     }
+    intent = Intents.QUERY;
     if (intent === Intents.QUERY) {
         // Create the query from the new tree
         intent = Intents.QUERY;
@@ -983,7 +980,7 @@ function stringToFunction(word) {
         case "its":
         case "'s":
         case "'":
-            return { name: "select", type: FunctionTypes.SELECT, fields: [{ name: "subject", types: [Properties.ENTITY, Properties.COLLECTION] }], project: false };
+            return { name: "select", type: FunctionTypes.SELECT, fields: [{ name: "subject", types: [Properties.ENTITY, Properties.COLLECTION, Properties.ATTRIBUTE] }], project: false };
         case "by":
         case "per":
             return { name: "group", type: FunctionTypes.GROUP, fields: [{ name: "root", types: all },
@@ -1547,6 +1544,7 @@ function cloneEntity(entity) {
         node: entity.node,
         variable: entity.variable,
         project: entity.project,
+        entityAttr: entity.entityAttr,
     };
     return clone;
 }
@@ -1591,6 +1589,7 @@ function findEveEntity(search) {
             displayName: name,
             variable: name.replace(/ /g, ''),
             project: true,
+            entityAttr: false,
         };
         log(" Found: " + entity.id);
         return entity;
@@ -1688,6 +1687,9 @@ function findRelationship(nodeA, nodeB, context) {
     else if (nodeA.hasProperty(Properties.COLLECTION) && nodeB.hasProperty(Properties.COLLECTION)) {
         relationship = findCollToCollRelationship(nodeA, nodeB, context);
     }
+    else if (nodeA.hasProperty(Properties.ATTRIBUTE) && nodeB.hasProperty(Properties.ATTRIBUTE)) {
+        relationship = findAttrToAttrRelationship(nodeA, nodeB, context);
+    }
     // Add relationships to the nodes and context
     if (relationship.type !== RelationshipTypes.NONE) {
         nodeA.relationships.push(relationship);
@@ -1714,38 +1716,80 @@ function findRelationship(nodeA, nodeB, context) {
     }*/
 }
 // e.g. "meetings john was in"
-function findCollToEntRelationship(coll, ent) {
-    log("Finding Coll -> Ent relationship between \"" + coll.displayName + "\" and \"" + ent.displayName + "\"...");
-    /*if (coll === "collections") {
-      if (eve.findOne("collection entities", { entity: ent.id })) {
-        return { type: RelationshipTypes.DIRECT };
-      }
-    }*/
-    if (app_1.eve.findOne("collection entities", { collection: coll.id, entity: ent.id })) {
-        log("Found Direct relationship");
-        return { type: RelationshipTypes.DIRECT };
+function findAttrToAttrRelationship(nodeA, nodeB, context) {
+    log("Finding Attr -> Attr relationship between \"" + nodeA.name + "\" and \"" + nodeB.name + "\"...");
+    console.log(nodeA);
+    console.log(nodeB);
+    console.log(nodeA.hasProperty(Properties.POSSESSIVE));
+    console.log(nodeB.hasProperty(Properties.POSSESSIVE));
+    // Check whether one of the attributes is an entity attribute
+    var direct = false;
+    if (nodeA.hasProperty(Properties.POSSESSIVE)) {
+        direct = true;
     }
-    var relationship = app_1.eve.query("")
-        .select("collection entities", { collection: coll.id }, "collection")
-        .select("directionless links", { entity: ["collection", "entity"], link: ent.id }, "links")
-        .exec();
-    if (relationship.unprojected.length) {
-        log("Found One-Hop Relationship");
-        return { type: RelationshipTypes.ONEHOP };
-    } /*
-    // e.g. events with chris granger (events -> meetings -> chris granger)
-    let relationships2 = eve.query(``)
-      .select("collection entities", { collection: coll }, "collection")
-      .select("directionless links", { entity: ["collection", "entity"] }, "links")
-      .select("directionless links", { entity: ["links", "link"], link: ent }, "links2")
-      .exec();
-    if (relationships2.unprojected.length) {
-      let entities = extractFromUnprojected(relationships2.unprojected, 1, 3);
-      return { type: RelationshipTypes.TWOHOP };
-    }*/
-    log("  No relationship found");
+    else if (nodeB.hasProperty(Properties.POSSESSIVE)) {
+        var tNode = nodeA;
+        nodeA = nodeB;
+        nodeB = tNode;
+        direct = true;
+    }
+    if (direct) {
+        log("  Found a direct relationship");
+        // Create an entity attribute
+        var entityAttr = nodeA.attribute;
+        var ent = {
+            id: entityAttr.variable,
+            displayName: entityAttr.variable,
+            variable: entityAttr.variable,
+            project: false,
+            entityAttr: true,
+        };
+        var nToken = newToken(entityAttr.variable);
+        var nNode = newNode(nToken);
+        nNode.entity = ent;
+        ent.node = nNode;
+        nodeB.attribute.variable = nodeA.attribute.variable + "|" + nodeB.attribute.id;
+        nodeB.attribute.refs = [nNode];
+        console.log(nodeA);
+        return { type: RelationshipTypes.DIRECT, nodes: [nodeA, nodeB] };
+    }
     return { type: RelationshipTypes.NONE };
 }
+/*
+// e.g. "meetings john was in"
+function findCollToEntRelationship(coll: Collection, ent: Entity): Relationship {
+  log(`Finding Coll -> Ent relationship between "${coll.displayName}" and "${ent.displayName}"...`);
+  if (coll === "collections") {
+    if (eve.findOne("collection entities", { entity: ent.id })) {
+      return { type: RelationshipTypes.DIRECT };
+    }
+  }
+  if (eve.findOne("collection entities", { collection: coll.id, entity: ent.id })) {
+    log("Found Direct relationship")
+    return { type: RelationshipTypes.DIRECT };
+  }
+  
+  let relationship = eve.query(``)
+    .select("collection entities", { collection: coll.id }, "collection")
+    .select("directionless links", { entity: ["collection", "entity"], link: ent.id }, "links")
+    .exec();
+  if (relationship.unprojected.length) {
+    log("Found One-Hop Relationship");
+    return { type: RelationshipTypes.ONEHOP };
+  }/*
+  // e.g. events with chris granger (events -> meetings -> chris granger)
+  let relationships2 = eve.query(``)
+    .select("collection entities", { collection: coll }, "collection")
+    .select("directionless links", { entity: ["collection", "entity"] }, "links")
+    .select("directionless links", { entity: ["links", "link"], link: ent }, "links2")
+    .exec();
+  if (relationships2.unprojected.length) {
+    let entities = extractFromUnprojected(relationships2.unprojected, 1, 3);
+    return { type: RelationshipTypes.TWOHOP };
+  }
+  log("  No relationship found");
+  return { type: RelationshipTypes.NONE };
+}*/
 function findEntToAttrRelationship(ent, attr, context) {
     log("Finding Ent -> Attr relationship between \"" + ent.name + "\" and \"" + attr.name + "\"...");
     // Check for a direct relationship
@@ -1768,62 +1812,64 @@ function findEntToAttrRelationship(ent, attr, context) {
         .select("entity eavs", { entity: ["links", "link"], attribute: attr.attribute.id }, "eav")
         .exec();
     if (eveRelationship.unprojected.length) {
-        log("Found One-Hop Relationship");
         log(eveRelationship);
         // Fill in the attribute
         var entities = extractFromUnprojected(eveRelationship.unprojected, 0, 2, "link");
         var collections = findCommonCollections(entities);
+        console.log(collections);
+        console.log(entities);
         var collLinkID;
         if (collections.length > 0) {
+            log("  Found One-Hop Relationship");
             // @HACK Choose the correct collection in a smart way. 
             // Largest collection other than entity or testdata?
             collLinkID = collections[0];
+            var foundCollection = findEveCollection(collLinkID);
+            var linkToken = newToken(foundCollection.displayName);
+            var linkCollection = newNode(linkToken);
+            findCollection(linkCollection, context);
+            var attribute = attr.attribute;
+            var varName = (linkCollection.name + "|" + attr.name).replace(/ /g, '');
+            attribute.variable = varName;
+            attribute.refs = [linkCollection];
+            // Find the one-hop link
+            var getAttr = app_1.eve.query("")
+                .select("directionless links", { entity: ent.entity.id }, "links")
+                .select("entity eavs", { entity: ["links", "link"], value: ent.entity.id }, "eav")
+                .exec();
+            var attributes = extractFromUnprojected(getAttr.unprojected, 1, 2, "attribute");
+            attributes = attributes.filter(onlyUnique);
+            var attrLinkID;
+            var nNode;
+            var implicitNodes = [];
+            if (attributes.length > 0) {
+                attrLinkID = attributes[0];
+                // Build a link attribute node
+                var newName = attrLinkID;
+                var nToken = newToken(newName);
+                nNode = newNode(nToken);
+                var nAttribute = {
+                    id: attrLinkID,
+                    refs: [linkCollection],
+                    node: nNode,
+                    displayName: attrLinkID,
+                    variable: "\"" + ent.entity.id + "\"",
+                    project: false,
+                };
+                nNode.attribute = nAttribute;
+                nNode.properties.push(Properties.ATTRIBUTE);
+                nNode.found = true;
+            }
+            // Project what we need to
+            attribute.project = true;
+            ent.entity.project = false;
+            ent.entity.handled = true;
+            var relationship = { type: RelationshipTypes.ONEHOP, nodes: [ent, attr], implicitNodes: implicitNodes };
+            if (nNode !== undefined) {
+                nNode.relationships.push(relationship);
+            }
+            return relationship;
         }
-        var foundCollection = findEveCollection(collLinkID);
-        var linkToken = newToken(foundCollection.displayName);
-        var linkCollection = newNode(linkToken);
-        findCollection(linkCollection, context);
-        var attribute = attr.attribute;
-        var varName = (linkCollection.name + "|" + attr.name).replace(/ /g, '');
-        attribute.variable = varName;
-        attribute.refs = [linkCollection];
-        // Find the one-hop link
-        var getAttr = app_1.eve.query("")
-            .select("directionless links", { entity: ent.entity.id }, "links")
-            .select("entity eavs", { entity: ["links", "link"], value: ent.entity.id }, "eav")
-            .exec();
-        var attributes = extractFromUnprojected(getAttr.unprojected, 1, 2, "attribute");
-        attributes = attributes.filter(onlyUnique);
-        var attrLinkID;
-        var nNode;
-        var implicitNodes = [];
-        if (attributes.length > 0) {
-            attrLinkID = attributes[0];
-            // Build a link attribute node
-            var newName = attrLinkID;
-            var nToken = newToken(newName);
-            nNode = newNode(nToken);
-            var nAttribute = {
-                id: attrLinkID,
-                refs: [linkCollection],
-                node: nNode,
-                displayName: attrLinkID,
-                variable: "\"" + ent.entity.id + "\"",
-                project: false,
-            };
-            nNode.attribute = nAttribute;
-            nNode.properties.push(Properties.ATTRIBUTE);
-            nNode.found = true;
-        }
-        // Project what we need to
-        attribute.project = true;
-        ent.entity.project = false;
-        ent.entity.handled = true;
-        var relationship = { type: RelationshipTypes.ONEHOP, nodes: [ent, attr], implicitNodes: implicitNodes };
-        if (nNode !== undefined) {
-            nNode.relationships.push(relationship);
-        }
-        return relationship;
     }
     /*
     let relationships2 = eve.query(``)
@@ -2247,7 +2293,7 @@ function formQuery(node) {
             for (var _c = 0, _d = attr.refs; _c < _d.length; _c++) {
                 var ref = _d[_c];
                 var entityVar = ref.entity !== undefined ? ref.entity.id : ref.collection.variable;
-                var fieldVar = ref.entity !== undefined ? false : true;
+                var fieldVar = ref.entity !== undefined && ref.entity.entityAttr === false ? false : true;
                 if (fields.length === 0) {
                     var entityField = {
                         name: "entity",
