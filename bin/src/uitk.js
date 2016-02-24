@@ -296,9 +296,11 @@ function submitAdder(event, elem) {
     app_1.dispatch("submit tile adder", { key: elem.key, node: event.currentTarget.parentNode.parentNode.firstChild.firstChild }).commit();
 }
 function submitProperty(adder, state, node) {
+    if (!state.propertyProperty === undefined || !state.propertyValue === undefined)
+        return;
     app_1.dispatch("add sourced eav", { entity: state.entityId, attribute: state.propertyProperty, value: state.propertyValue, forceEntity: true }).commit();
-    state.propertyValue = "";
-    state.propertyProperty = "";
+    state.propertyValue = undefined;
+    state.propertyProperty = undefined;
     //make sure the focus is in the value
     node.parentNode.firstChild.focus();
 }
@@ -408,7 +410,7 @@ function imageAdderUI(elem) {
             { children: [
                     { c: "tile small", children: [
                             { c: "tile-content-wrapper", children: [
-                                    { t: "input", c: "value", placeholder: "image url", value: state.propertyValue, attribute: "imageValue", input: trackPropertyAdderInput, postRender: autosizeAndFocus, keydown: adderKeys, entityId: entityId, key: key },
+                                    { t: "input", c: "value", placeholder: "image url", value: state.imageValue, attribute: "imageValue", input: trackPropertyAdderInput, postRender: autosizeAndFocus, keydown: adderKeys, entityId: entityId, key: key },
                                 ] },
                             { c: "controls flex-row", children: [
                                     { c: "ion-checkmark submit", click: submitAdder, key: key },
@@ -717,7 +719,7 @@ function tableBody(elem) {
             var field_3 = groups[_g];
             if (openVals[field_3] === row[field_3]) {
                 group = openRows[field_3];
-                group.rows.push(row);
+                group.children[0].rows.push(row);
             }
             else {
                 openVals[field_3] = row[field_3];

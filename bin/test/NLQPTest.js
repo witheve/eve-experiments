@@ -131,7 +131,7 @@ var phrases = [
     "Corey's wife's age, gender, and height",
     */
     // -------------------------------
-    "Corey's department is engineering"
+    "corey's wife's age"
 ];
 /*
 let siriphrases = [

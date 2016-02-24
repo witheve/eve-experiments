@@ -476,6 +476,12 @@ var Indexer = (function () {
     //---------------------------------------------------------
     // Indexer Public API
     //---------------------------------------------------------
+    Indexer.prototype.deleteDB = function () {
+        for (var table in this.tables) {
+            this.removeView(table);
+            this.clearTable(table);
+        }
+    };
     Indexer.prototype.serialize = function (asObject) {
         var dump = {};
         for (var tableName in this.tables) {

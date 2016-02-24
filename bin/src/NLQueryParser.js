@@ -52,9 +52,9 @@ function parse(queryString, lastParse) {
         context = treeResult.context;
     }
     // Manage context
-    context.entities = context.found.filter(function (n) { return n.hasProperty(Properties.ENTITY); });
-    context.collections = context.found.filter(function (n) { return n.hasProperty(Properties.COLLECTION); });
-    context.attributes = context.found.filter(function (n) { return n.hasProperty(Properties.ATTRIBUTE); });
+    context.entities = context.found.filter(function (n) { return n.hasProperty(Properties.ENTITY) && !n.hasProperty(Properties.SUBSUMED); });
+    context.collections = context.found.filter(function (n) { return n.hasProperty(Properties.COLLECTION) && !n.hasProperty(Properties.SUBSUMED); });
+    context.attributes = context.found.filter(function (n) { return n.hasProperty(Properties.ATTRIBUTE) && !n.hasProperty(Properties.SUBSUMED); });
     // Manage results
     var intent = Intents.NORESULT;
     var query = newQuery();
@@ -89,14 +89,26 @@ function parse(queryString, lastParse) {
         else if (context.maybeAttributes.length > 0) {
             intent = Intents.MOREINFO;
         }
-        else {
-            // Create the query from the new tree
-            intent = Intents.QUERY;
-            log("Building query...");
-            query = formQuery(tree);
-            if (query.projects.length === 0) {
+        else if (context.relationships.length === 0) {
+            if (context.fxns.length === 0 && context.attributes.length > 0 && context.found.length > 1) {
                 intent = Intents.NORESULT;
             }
+            else {
+                intent = Intents.QUERY;
+            }
+        }
+        else {
+            intent = Intents.QUERY;
+        }
+    }
+    if (intent === Intents.QUERY) {
+        // Create the query from the new tree
+        intent = Intents.QUERY;
+        log("Building query...");
+        query = formQuery(tree);
+        if (query.projects.length === 0) {
+            intent = Intents.NORESULT;
+            query = newQuery();
         }
     }
     return [{ intent: intent, context: context, tokens: tokens, tree: tree, query: query, inserts: insertResults }];
@@ -874,6 +886,7 @@ function newContext() {
         maybeCollections: [],
         maybeFunctions: [],
         maybeArguments: [],
+        internalFxns: [],
         nodes: [],
         stateFlags: { list: false, insert: false },
     };
@@ -1029,7 +1042,12 @@ function findFunction(node, context) {
     }
     node.found = true;
     node.type = NodeTypes.FUNCTION;
-    context.fxns.push(node);
+    if (node.fxn.type === FunctionTypes.AGGREGATE ||
+        node.fxn.type === FunctionTypes.CALCULATE ||
+        node.fxn.type === FunctionTypes.FILTER) {
+        context.fxns.push(node);
+    }
+    context.internalFxns.push(node);
     return true;
 }
 function formTree(node, tree, context) {
@@ -1183,7 +1201,17 @@ function formTree(node, tree, context) {
     }
     // If the node wasn't found at all, don't try to place it anywhere
     if (!node.found && context.stateFlags.insert === false) {
-        context.maybeAttributes.push(node);
+        if (getMajorPOS(node.token.POS) === MajorPartsOfSpeech.NOUN) {
+            if (node.hasProperty(Properties.PROPER)) {
+                context.maybeEntities.push(node);
+            }
+            else if (node.hasProperty(Properties.PLURAL)) {
+                context.maybeCollections.push(node);
+            }
+            else {
+                context.maybeAttributes.push(node);
+            }
+        }
         return { tree: tree, context: context };
     }
     else if (!node.found && context.stateFlags.insert === true) {
@@ -1217,7 +1245,6 @@ function formTree(node, tree, context) {
                     for (var _b = 0, _c = child.children; _b < _c.length; _b++) {
                         var grandChild = _c[_b];
                         removeBranch(grandChild);
-                        console.log(grandChild);
                         formTree(grandChild, tree, context);
                     }
                 }
@@ -1227,7 +1254,7 @@ function formTree(node, tree, context) {
                 }
             }
             // filter context
-            context.fxns = context.fxns.filter(function (f) { return !f.hasProperty(Properties.SUBSUMED); });
+            context.internalFxns = context.internalFxns.filter(function (f) { return !f.hasProperty(Properties.SUBSUMED); });
             context.arguments = context.arguments.filter(function (a) { return !a.parent.hasProperty(Properties.SUBSUMED); });
             return { tree: tree, context: context };
         }
@@ -1360,7 +1387,7 @@ function formTree(node, tree, context) {
             }
         }
         // Place the node onto a function if one is open
-        var openFunctions = context.fxns.filter(function (fxn) { return !fxn.children.every(function (c) { return c.found; }); });
+        var openFunctions = context.internalFxns.filter(function (fxn) { return !fxn.children.every(function (c) { return c.found; }); });
         for (var _h = 0; _h < openFunctions.length; _h++) {
             var fxnNode = openFunctions[_h];
             var added = addNodeToFunction(node, fxnNode, context);
@@ -1489,16 +1516,17 @@ function addNodeToFunction(node, fxnNode, context) {
     else {
         arg = fxnNode.children.filter(function (c) { return c.hasProperty(Properties.ROOT); }).shift();
     }
-    if (fxnNode.fxn.type === FunctionTypes.GROUP && arg.name === "collection") {
-        context.groupings.push(node);
-    }
     // Add the node to the arg
     if (arg !== undefined) {
-        if (fxnNode.fxn.type === FunctionTypes.SELECT) {
+        if (fxnNode.fxn.type === FunctionTypes.GROUP && arg.name === "collection") {
+            context.groupings.push(node);
+            arg.addChild(node);
+        }
+        else if (fxnNode.fxn.type === FunctionTypes.SELECT) {
             var root = findParentWithProperty(fxnNode, Properties.ROOT);
             removeBranch(fxnNode);
             context.arguments.splice(context.arguments.indexOf(node.children[0]), 1);
-            context.fxns.splice(context.fxns.indexOf(fxnNode), 1);
+            context.internalFxns.splice(context.internalFxns.indexOf(fxnNode), 1);
             node.properties.push(Properties.POSSESSIVE);
             root.addChild(node);
         }
@@ -1767,30 +1795,34 @@ function findEntToAttrRelationship(ent, attr, context) {
         var attributes = extractFromUnprojected(getAttr.unprojected, 1, 2, "attribute");
         attributes = attributes.filter(onlyUnique);
         var attrLinkID;
+        var nNode;
+        var implicitNodes = [];
         if (attributes.length > 0) {
             attrLinkID = attributes[0];
+            // Build a link attribute node
+            var newName = attrLinkID;
+            var nToken = newToken(newName);
+            nNode = newNode(nToken);
+            var nAttribute = {
+                id: attrLinkID,
+                refs: [linkCollection],
+                node: nNode,
+                displayName: attrLinkID,
+                variable: "\"" + ent.entity.id + "\"",
+                project: false,
+            };
+            nNode.attribute = nAttribute;
+            nNode.properties.push(Properties.ATTRIBUTE);
+            nNode.found = true;
         }
-        // Build a link attribute node
-        var newName = attrLinkID;
-        var nToken = newToken(newName);
-        var nNode = newNode(nToken);
-        var nAttribute = {
-            id: attrLinkID,
-            refs: [linkCollection],
-            node: nNode,
-            displayName: attrLinkID,
-            variable: "\"" + ent.entity.id + "\"",
-            project: false,
-        };
-        nNode.attribute = nAttribute;
-        nNode.properties.push(Properties.ATTRIBUTE);
-        nNode.found = true;
         // Project what we need to
         attribute.project = true;
         ent.entity.project = false;
         ent.entity.handled = true;
-        var relationship = { type: RelationshipTypes.ONEHOP, nodes: [ent, attr], implicitNodes: [nNode] };
-        nNode.relationships.push(relationship);
+        var relationship = { type: RelationshipTypes.ONEHOP, nodes: [ent, attr], implicitNodes: implicitNodes };
+        if (nNode !== undefined) {
+            nNode.relationships.push(relationship);
+        }
         return relationship;
     }
     /*

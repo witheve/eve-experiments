@@ -96,7 +96,7 @@ function inferRepresentation(search, baseParams) {
     return { rep: params.rep, params: params };
 }
 function staticOrMappedTable(search, params) {
-    var parsed = NLQueryParser_1.parse(search);
+    var parsed = safeNLParse(search);
     var topParse = parsed[0];
     params.rep = "table";
     params.search = search;
@@ -104,7 +104,7 @@ function staticOrMappedTable(search, params) {
     params.fields = topParse.query.projects[0].fields.map(function (field) { return field.name; });
     params.groups = topParse.context.groupings.map(function (group) { return group.name; });
     //params.fields = uitk.getFields({example: results[0], blacklist: ["__id"]});
-    if (!topParse)
+    if (!topParse || topParse.intent !== NLQueryParser_1.Intents.QUERY)
         return params;
     // Must not contain any primitive relations
     var editable = true;
@@ -177,6 +177,16 @@ function staticOrMappedTable(search, params) {
         return params;
     }
     return params;
+}
+function safeNLParse(query) {
+    try {
+        return NLQueryParser_1.parse(query);
+    }
+    catch (e) {
+        console.error("NLParse error");
+        console.error(e);
+        return [{ intent: NLQueryParser_1.Intents.NORESULT, context: {}, query: {}, projects: {} }];
+    }
 }
 //---------------------------------------------------------
 // Dispatches
@@ -383,7 +393,7 @@ app_1.handle("create query", function (changes, _a) {
 app_1.handle("insert query", function (changes, _a) {
     var query = _a.query;
     query = query.trim().toLowerCase();
-    var parsed = NLQueryParser_1.parse(query);
+    var parsed = safeNLParse(query);
     var topParse = parsed[0];
     if (app_1.eve.findOne("query to id", { query: query }))
         return;
@@ -424,7 +434,7 @@ function dispatchSearchSetAttributes(query, chain) {
     if (!chain) {
         chain = app_1.dispatch();
     }
-    var parsed = NLQueryParser_1.parse(query);
+    var parsed = safeNLParse(query);
     var topParse = parsed[0];
     var isSetSearch = false;
     if (topParse.intent === NLQueryParser_1.Intents.INSERT) {
@@ -640,6 +650,7 @@ function loadFromFile(event, elem) {
     var reader = new FileReader();
     reader.onload = function (event) {
         var serialized = event.target.result;
+        app_1.eve.deleteDB();
         app_1.eve.load(serialized);
         app_1.dispatch("toggle prompt", { prompt: loadedPrompt, open: true }).commit();
     };
@@ -666,13 +677,15 @@ function nukeDatabase() {
 }
 function savePrompt() {
     var serialized = localStorage[app_1.eveLocalStorageKey];
+    var blob = new Blob([serialized], { type: "application/json" });
+    var url = URL.createObjectURL(blob);
     return { c: "modal-prompt save-prompt", children: [
             { t: "header", c: "flex-row", children: [
                     { t: "h2", text: "Save DB" },
                     { c: "flex-grow" },
                     { c: "controls", children: [{ c: "ion-close-round", click: closePrompt }] }
                 ] },
-            { t: "a", href: "data:application/octet-stream;charset=utf-16le;base64," + btoa(serialized), download: "save.evedb", text: "save to file" }
+            { t: "a", href: url, download: "save.evedb", text: "save to file" }
         ] };
 }
 function loadPrompt() {
@@ -716,7 +729,7 @@ function pane(paneId) {
     var contentType = "invalid";
     if (contains.length === 0 || entityId)
         contentType = "entity";
-    else if (app_1.eve.findOne("query to id", { query: contains }))
+    else if (app_1.eve.findOne("query to id", { query: contains.trim().toLowerCase() }))
         contentType = "search";
     if (params.rep || rep) {
         content = represent(contains, params.rep || rep, results, params, (params.unwrapped ? undefined : function (elem, ix) { return uitk.card({ id: paneId + "|" + contains + "|" + (ix === undefined ? "" : ix), children: [elem] }); }));
@@ -916,8 +929,12 @@ function getCellParams(content, rawParams) {
     else {
         if (params["rep"])
             return params;
-        var parsed = NLQueryParser_1.parse(content);
+        var parsed = safeNLParse(content);
         var currentParse = parsed[0];
+        if (currentParse.intent === NLQueryParser_1.Intents.NORESULT) {
+            params["rep"] = "error";
+            return params;
+        }
         var context_1 = currentParse.context;
         var hasCollections = context_1.collections.length;
         var field;
@@ -1054,7 +1071,7 @@ function autocompleterOptions(entityId, paneId, cell) {
     var parsed = [];
     if (text !== "") {
         try {
-            parsed = NLQueryParser_1.parse(text); // @TODO: this should come from the NLP parser once it's hooked up.
+            parsed = safeNLParse(text); // @TODO: this should come from the NLP parser once it's hooked up.
         }
         catch (e) {
         }
@@ -1379,7 +1396,7 @@ function interpretAttributeValue(value) {
         if (entityId) {
             return { isValue: true, value: entityId };
         }
-        var parsed = NLQueryParser_1.parse(cleaned);
+        var parsed = safeNLParse(cleaned);
         return { isValue: false, parse: parsed, value: cleaned };
     }
     else {
@@ -1705,6 +1722,7 @@ app_1.handle("toggle add tile", function (changes, _a) {
     state.showAdd = !state.showAdd;
     state.entityId = entityId;
     state.key = key;
+    state.activeTile = undefined;
     // in case you closed it with an adder selected
     if (state.showAdd) {
         state.adder = undefined;
