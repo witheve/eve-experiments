@@ -3,11 +3,18 @@ var runtime = require("./runtime");
 var app = require("./app");
 var app_1 = require("./app");
 var parser_1 = require("./parser");
+var NLQueryParser_1 = require("./NLQueryParser");
 var uiRenderer_1 = require("./uiRenderer");
 exports.ixer = app_1.eve;
 //-----------------------------------------------------------------------------
 // Utilities
 //-----------------------------------------------------------------------------
+runtime.define("normalize string", { result: "result" }, function (text) {
+    if (typeof text === "string") {
+        return { result: NLQueryParser_1.normalizeString(text) };
+    }
+    return { result: text };
+});
 // export function UIFromDSL(str:string):UI {
 //   function processElem(data:UIElem):UI {
 //     let elem = new UI(data.id || uuid());
@@ -184,6 +191,7 @@ app.init("bootstrap", function bootstrap() {
     // Entity System
     //-----------------------------------------------------------------------------
     var phase = new BSPhase(app_1.eve);
+    phase.changeset.addMany("display name", [{ id: "is a", name: "is a" }, { id: "content", name: "content" }, { id: "artifact", name: "artifact" }]);
     phase.addTable("manual entity", ["entity", "content"]);
     phase.addTable("sourced eav", ["entity", "attribute", "value", "source"]);
     phase.addTable("page content", ["page", "content"]);
@@ -210,7 +218,7 @@ app.init("bootstrap", function bootstrap() {
         .addUnionMember("directionless links", "entity links", { entity: "link", link: "entity" });
     phase.addUnion("collection entities", ["entity", "collection"])
         .addUnionMember("collection entities", "is a attributes");
-    phase.addArtifacts(parser_1.parseDSL("\n    (query :$$view \"bs: index name\"\n      (display-name :id id :name raw)\n      (lowercase :text raw :result name)\n      (project! \"index name\" :id id :name name))\n  "));
+    phase.addArtifacts(parser_1.parseDSL("\n    (query :$$view \"bs: index name\"\n      (display-name :id id :name raw)\n      (normalize-string :text raw :result name)\n      (project! \"index name\" :id id :name name))\n  "));
     phase.addArtifacts(parser_1.parseDSL("\n    (query :$$view \"bs: entity\"\n      (entity-page :entity entity :page page)\n      (page-content :page page :content content)\n      (project! \"entity\" :entity entity :content content))\n  "));
     phase.addArtifacts(parser_1.parseDSL("\n    (query :$$view \"bs: unmodified added bits\"\n      (added-bits :entity entity :content content)\n      (negate (manual-entity :entity entity))\n      (project! \"unmodified added bits\" :entity entity :content content))\n  "));
     phase.addArtifacts(parser_1.parseDSL("\n    (query :$$view \"bs: is a attributes\"\n      (entity-eavs :attribute \"is a\" :entity entity :value value)\n      (project! \"is a attributes\" :collection value :entity entity))\n  "));

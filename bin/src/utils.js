@@ -224,12 +224,15 @@ function srand(z) {
     return function () { return z = (a * z + c) % m / m; };
 }
 exports.srand = srand;
-// Shuffle courtesy of <http://stackoverflow.com/a/6274381>
-function shuffle(o, rand) {
+function shuffle(arr, rand) {
     if (rand === void 0) { rand = Math.random; }
-    for (var j, x, i = o.length; i; j = Math.floor(rand() * i), x = o[--i], o[i] = o[j], o[j] = x)
-        ;
-    return o;
+    for (var i = arr.length - 1; i > 0; i -= 1) {
+        var j = Math.floor(rand() * (i + 1));
+        var tmp = arr[i];
+        arr[i] = arr[j];
+        arr[j] = tmp;
+    }
+    return arr;
 }
 exports.shuffle = shuffle;
 function sortByField(field, direction) {

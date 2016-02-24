@@ -52,15 +52,18 @@ function parse(queryString, lastParse) {
         context = treeResult.context;
     }
     // Manage context
-    context.entities = context.found.filter(function (n) { return n.hasProperty(Properties.ENTITY) && !n.hasProperty(Properties.SUBSUMED); });
-    context.collections = context.found.filter(function (n) { return n.hasProperty(Properties.COLLECTION) && !n.hasProperty(Properties.SUBSUMED); });
-    context.attributes = context.found.filter(function (n) { return n.hasProperty(Properties.ATTRIBUTE) && !n.hasProperty(Properties.SUBSUMED); });
+    context.entities = context.found.filter(function (n) { return n.hasProperty(Properties.ENTITY) && !n.hasProperty(Properties.SUBSUMED) && !n.hasProperty(Properties.IMPLICIT); });
+    context.collections = context.found.filter(function (n) { return n.hasProperty(Properties.COLLECTION) && !n.hasProperty(Properties.SUBSUMED) && !n.hasProperty(Properties.IMPLICIT); });
+    context.attributes = context.found.filter(function (n) { return n.hasProperty(Properties.ATTRIBUTE) && !n.hasProperty(Properties.SUBSUMED) && !n.hasProperty(Properties.IMPLICIT); });
+    context.maybeAttributes = context.maybeAttributes.filter(function (n) { return !n.hasProperty(Properties.SUBSUMED); });
+    context.maybeCollections = context.maybeCollections.filter(function (n) { return !n.hasProperty(Properties.SUBSUMED); });
+    context.maybeEntities = context.maybeEntities.filter(function (n) { return !n.hasProperty(Properties.SUBSUMED); });
     // Manage results
     var intent = Intents.NORESULT;
     var query = newQuery();
     var insertResults = [];
     if (allFound(tree)) {
-        var inserts = context.fxns.filter(function (f) { return f.fxn.type === FunctionTypes.INSERT; });
+        var inserts = context.internalFxns.filter(function (f) { return f.fxn.type === FunctionTypes.INSERT; });
         if (inserts.length > 0) {
             intent = Intents.INSERT;
             // Format each insert
@@ -89,15 +92,15 @@ function parse(queryString, lastParse) {
         else if (context.maybeAttributes.length > 0) {
             intent = Intents.MOREINFO;
         }
-        else if (context.found.length > 0 &&
-            context.attributes.filter(function (a) { return a.attribute.refs === undefined && !a.parent.hasProperty(Properties.ARGUMENT); }).length > 0) {
+        else if (context.found.length > 1 &&
+            ((context.attributes.filter(function (a) { return a.attribute.refs === undefined && !a.parent.hasProperty(Properties.ARGUMENT); }).length > 0) ||
+                (context.collections.filter(function (c) { return c.relationships.length === 0; }).length > 0))) {
             intent = Intents.NORESULT;
         }
         else {
             intent = Intents.QUERY;
         }
     }
-    intent = Intents.QUERY;
     if (intent === Intents.QUERY) {
         // Create the query from the new tree
         intent = Intents.QUERY;
@@ -128,7 +131,7 @@ function normalizeQueryString(queryString) {
     var normalizedQueryString = queryString.replace(/,/g, ' , ');
     normalizedQueryString = normalizedQueryString.replace(/;/g, ' ; ');
     normalizedQueryString = normalizedQueryString.replace(/\+/g, ' + ');
-    normalizedQueryString = normalizedQueryString.replace(/\+/g, ' ^ ');
+    normalizedQueryString = normalizedQueryString.replace(/\^/g, ' ^ ');
     normalizedQueryString = normalizedQueryString.replace(/-/g, ' - ');
     normalizedQueryString = normalizedQueryString.replace(/\*/g, ' * ');
     normalizedQueryString = normalizedQueryString.replace(/\//g, ' / ');
@@ -147,6 +150,28 @@ function normalizeQueryString(queryString) {
     return words;
 }
 exports.normalizeQueryString = normalizeQueryString;
+function normalizeString(queryString) {
+    // Add whitespace before and after separator and operators
+    var normalized = queryString.replace(/,/g, ' , ');
+    normalized = normalized.replace(/;/g, ' ; ');
+    normalized = normalized.replace(/\+/g, ' + ');
+    normalized = normalized.replace(/\^/g, ' ^ ');
+    normalized = normalized.replace(/-/g, ' - ');
+    normalized = normalized.replace(/\*/g, ' * ');
+    normalized = normalized.replace(/\//g, ' / ');
+    normalized = normalized.replace(/"/g, ' " ');
+    // Split possessive endings
+    normalized = normalized.replace(/\'s/g, ' \'s ');
+    normalized = normalized.replace(/s'/g, 's \' ');
+    // Clean various symbols we don't want to deal with
+    normalized = normalized.replace(/`|\?|\:|\[|\]|\{|\}|\(|\)|\~|\`|~|@|#|\$|%|&|_|\|/g, ' ');
+    // Collapse whitespace   
+    normalized = normalized.replace(/\s+/g, ' ');
+    normalized = normalized.toLowerCase();
+    normalized = singularize(normalized);
+    return normalized;
+}
+exports.normalizeString = normalizeString;
 // ----------------------------------------------------------------------------
 // Token functions
 // ----------------------------------------------------------------------------
@@ -250,8 +275,8 @@ var Properties;
     // Node properties
     Properties[Properties["ROOT"] = 0] = "ROOT";
     // EVE attributes
-    Properties[Properties["ENTITY"] = 1] = "ENTITY";
-    Properties[Properties["COLLECTION"] = 2] = "COLLECTION";
+    Properties[Properties["COLLECTION"] = 1] = "COLLECTION";
+    Properties[Properties["ENTITY"] = 2] = "ENTITY";
     Properties[Properties["ATTRIBUTE"] = 3] = "ATTRIBUTE";
     // Function properties
     Properties[Properties["FUNCTION"] = 4] = "FUNCTION";
@@ -312,6 +337,7 @@ function formToken(word) {
     var whDeterminers = ['whatever', 'which'];
     var whPossessivePronoun = ['whose'];
     var whAdverbs = ['how', 'when', 'however', 'whenever', 'where', 'why'];
+    var verbs = ['have', 'do'];
     // We have three cases: the word is a symbol (of which there are various kinds), a number, or a string
     // ----------------------
     // Case 1: handle symbols
@@ -438,6 +464,9 @@ function formToken(word) {
         else if (whPossessivePronoun.indexOf(normalizedWord) >= 0) {
             POS = MinorPartsOfSpeech.WPO;
             properties.push(Properties.POSSESSIVE);
+        }
+        else if (verbs.indexOf(normalizedWord) >= 0) {
+            POS = MinorPartsOfSpeech.VB;
         }
         // Set grouping property
         var groupingWords = ['per', 'by'];
@@ -906,8 +935,8 @@ function stringToFunction(word) {
         { name: "b", types: [Properties.ATTRIBUTE, Properties.QUANTITY] }
     ];
     var calculateFields = [{ name: "result", types: [Properties.OUTPUT] },
-        { name: "a", types: [Properties.ATTRIBUTE, Properties.QUANTITY] },
-        { name: "b", types: [Properties.ATTRIBUTE, Properties.QUANTITY] }
+        { name: "a", types: [Properties.ATTRIBUTE, Properties.QUANTITY, Properties.FUNCTION] },
+        { name: "b", types: [Properties.ATTRIBUTE, Properties.QUANTITY, Properties.FUNCTION] }
     ];
     switch (word) {
         case ">":
@@ -984,7 +1013,7 @@ function stringToFunction(word) {
         case "by":
         case "per":
             return { name: "group", type: FunctionTypes.GROUP, fields: [{ name: "root", types: all },
-                    { name: "collection", types: [Properties.COLLECTION] }], project: false };
+                    { name: "collection", types: [Properties.COLLECTION, Properties.ATTRIBUTE] }], project: false };
         case "except":
         case "without":
         case "not":
@@ -1335,14 +1364,26 @@ function formTree(node, tree, context) {
         else if (node.fxn.type === FunctionTypes.NEGATE) {
         }
         else if (node.fxn.type === FunctionTypes.CALCULATE) {
-            var QAs = context.nodes.filter(function (n) { return n.hasProperty(Properties.ATTRIBUTE) || n.hasProperty(Properties.QUANTITY); });
-            for (var _g = 0; _g < QAs.length; _g++) {
-                var qa = QAs[_g];
-                if (qa.parent.hasProperty(Properties.ARGUMENT)) {
+            var AQFs = context.nodes.filter(function (n) { return n.hasProperty(Properties.ATTRIBUTE) ||
+                n.hasProperty(Properties.QUANTITY) ||
+                n.hasProperty(Properties.FUNCTION); });
+            for (var _g = 0; _g < AQFs.length; _g++) {
+                var aqf = AQFs[_g];
+                if (aqf.parent.hasProperty(Properties.ARGUMENT)) {
                     continue;
                 }
-                removeNode(qa);
-                formTree(qa, tree, context);
+                if (aqf.hasProperty(Properties.FUNCTION)) {
+                    if (aqf.fxn.type === FunctionTypes.AGGREGATE) {
+                        removeBranch(aqf);
+                    }
+                    else {
+                        continue;
+                    }
+                }
+                else {
+                    removeNode(aqf);
+                }
+                formTree(aqf, tree, context);
                 if (node.children.every(function (n) { return n.found; })) {
                     break;
                 }
@@ -1369,6 +1410,9 @@ function formTree(node, tree, context) {
             //let orphans = tree.children.filter((child) => child.relationships.length === 0 && child.children.length === 0);  
             for (var i = context.found.length - 1; i >= 0; i--) {
                 var foundNode = context.found[i];
+                if (foundNode === node) {
+                    continue;
+                }
                 if (node.relationships.length === 0) {
                     removeNode(node);
                 }
@@ -1377,7 +1421,7 @@ function formTree(node, tree, context) {
                     break;
                 }
                 else if (relationship.type === RelationshipTypes.NONE) {
-                    if (foundNode.hasProperty(Properties.POSSESSIVE)) {
+                    if (foundNode.hasProperty(Properties.POSSESSIVE) && !node.hasProperty(Properties.QUANTITY)) {
                         context.maybeAttributes.push(node);
                     }
                 }
@@ -1537,17 +1581,6 @@ function addNodeToFunction(node, fxnNode, context) {
         return false;
     }
 }
-function cloneEntity(entity) {
-    var clone = {
-        id: entity.id,
-        displayName: entity.displayName,
-        node: entity.node,
-        variable: entity.variable,
-        project: entity.project,
-        entityAttr: entity.entityAttr,
-    };
-    return clone;
-}
 function cloneCollection(collection) {
     var clone = {
         id: collection.id,
@@ -1590,6 +1623,8 @@ function findEveEntity(search) {
             variable: name.replace(/ /g, ''),
             project: true,
             entityAttr: false,
+            entityVar: false,
+            valueVar: false,
         };
         log(" Found: " + entity.id);
         return entity;
@@ -1690,6 +1725,9 @@ function findRelationship(nodeA, nodeB, context) {
     else if (nodeA.hasProperty(Properties.ATTRIBUTE) && nodeB.hasProperty(Properties.ATTRIBUTE)) {
         relationship = findAttrToAttrRelationship(nodeA, nodeB, context);
     }
+    else if (nodeA.hasProperty(Properties.COLLECTION) && nodeB.hasProperty(Properties.ENTITY)) {
+        relationship = findCollToEntRelationship(nodeA, nodeB, context);
+    }
     // Add relationships to the nodes and context
     if (relationship.type !== RelationshipTypes.NONE) {
         nodeA.relationships.push(relationship);
@@ -1697,9 +1735,15 @@ function findRelationship(nodeA, nodeB, context) {
         context.relationships.push(relationship);
     }
     else {
+        nodes = [nodeA, nodeB].sort(function (a, b) { return a.ix - b.ix; });
+        nodeA = nodes[0];
+        nodeB = nodes[1];
         var repChanged = false;
         // If one node is possessive, it suggests the other should be represented as an attribute of the first
         if (nodeA.hasProperty(Properties.POSSESSIVE) && !nodeB.hasProperty(Properties.ATTRIBUTE) && nodeB.representations.attribute !== undefined) {
+            repChanged = changeRepresentation(nodeB, Properties.ATTRIBUTE, context);
+        }
+        else if (nodeA.hasProperty(Properties.COLLECTION) && nodeB.hasProperty(Properties.COLLECTION) && nodeB.representations.attribute !== undefined) {
             repChanged = changeRepresentation(nodeB, Properties.ATTRIBUTE, context);
         }
         if (repChanged) {
@@ -1718,10 +1762,6 @@ function findRelationship(nodeA, nodeB, context) {
 // e.g. "meetings john was in"
 function findAttrToAttrRelationship(nodeA, nodeB, context) {
     log("Finding Attr -> Attr relationship between \"" + nodeA.name + "\" and \"" + nodeB.name + "\"...");
-    console.log(nodeA);
-    console.log(nodeB);
-    console.log(nodeA.hasProperty(Properties.POSSESSIVE));
-    console.log(nodeB.hasProperty(Properties.POSSESSIVE));
     // Check whether one of the attributes is an entity attribute
     var direct = false;
     if (nodeA.hasProperty(Properties.POSSESSIVE)) {
@@ -1743,6 +1783,8 @@ function findAttrToAttrRelationship(nodeA, nodeB, context) {
             variable: entityAttr.variable,
             project: false,
             entityAttr: true,
+            entityVar: false,
+            valueVar: false,
         };
         var nToken = newToken(entityAttr.variable);
         var nNode = newNode(nToken);
@@ -1750,46 +1792,54 @@ function findAttrToAttrRelationship(nodeA, nodeB, context) {
         ent.node = nNode;
         nodeB.attribute.variable = nodeA.attribute.variable + "|" + nodeB.attribute.id;
         nodeB.attribute.refs = [nNode];
-        console.log(nodeA);
         return { type: RelationshipTypes.DIRECT, nodes: [nodeA, nodeB] };
     }
     return { type: RelationshipTypes.NONE };
 }
-/*
 // e.g. "meetings john was in"
-function findCollToEntRelationship(coll: Collection, ent: Entity): Relationship {
-  log(`Finding Coll -> Ent relationship between "${coll.displayName}" and "${ent.displayName}"...`);
-  if (coll === "collections") {
-    if (eve.findOne("collection entities", { entity: ent.id })) {
-      return { type: RelationshipTypes.DIRECT };
+function findCollToEntRelationship(coll, ent, context) {
+    log("Finding Coll -> Ent relationship between \"" + coll.name + "\" and \"" + ent.name + "\"...");
+    /*if (coll === "collections") {
+      if (eve.findOne("collection entities", { entity: nodeB.entity.id })) {
+        return { type: RelationshipTypes.DIRECT };
+      }
     }
-  }
-  if (eve.findOne("collection entities", { collection: coll.id, entity: ent.id })) {
-    log("Found Direct relationship")
-    return { type: RelationshipTypes.DIRECT };
-  }
-  
-  let relationship = eve.query(``)
-    .select("collection entities", { collection: coll.id }, "collection")
-    .select("directionless links", { entity: ["collection", "entity"], link: ent.id }, "links")
-    .exec();
-  if (relationship.unprojected.length) {
-    log("Found One-Hop Relationship");
-    return { type: RelationshipTypes.ONEHOP };
-  }/*
-  // e.g. events with chris granger (events -> meetings -> chris granger)
-  let relationships2 = eve.query(``)
-    .select("collection entities", { collection: coll }, "collection")
-    .select("directionless links", { entity: ["collection", "entity"] }, "links")
-    .select("directionless links", { entity: ["links", "link"], link: ent }, "links2")
-    .exec();
-  if (relationships2.unprojected.length) {
-    let entities = extractFromUnprojected(relationships2.unprojected, 1, 3);
-    return { type: RelationshipTypes.TWOHOP };
-  }
-  log("  No relationship found");
-  return { type: RelationshipTypes.NONE };
-}*/
+    if (eve.findOne("collection entities", { collection: coll.collection.id, entity: ent.entity.id })) {
+      log("  Found Direct relationship")
+      return { type: RelationshipTypes.DIRECT };
+    }*/
+    var eveRelationship = app_1.eve.query("")
+        .select("collection entities", { collection: coll.collection.id }, "collection")
+        .select("directionless links", { entity: ["collection", "entity"], link: ent.entity.id }, "links")
+        .exec();
+    if (eveRelationship.unprojected.length) {
+        var entities = extractFromUnprojected(eveRelationship.unprojected, 1, 2, "link");
+        var collections = findCommonCollections(entities);
+        var collLinkID;
+        if (collections.length > 0) {
+            log("  Found Direct Relationship");
+            var entity = ent.entity;
+            entity.entityVar = true;
+            entity.project = false;
+            entity.variable = coll.collection.variable;
+            var relationship = { type: RelationshipTypes.DIRECT, nodes: [coll, ent] };
+            return relationship;
+        }
+    }
+    /*
+    // e.g. events with chris granger (events -> meetings -> chris granger)
+    let relationships2 = eve.query(``)
+      .select("collection entities", { collection: coll }, "collection")
+      .select("directionless links", { entity: ["collection", "entity"] }, "links")
+      .select("directionless links", { entity: ["links", "link"], link: ent }, "links2")
+      .exec();
+    if (relationships2.unprojected.length) {
+      let entities = extractFromUnprojected(relationships2.unprojected, 1, 3);
+      return { type: RelationshipTypes.TWOHOP };
+    }*/
+    log("  No relationship found");
+    return { type: RelationshipTypes.NONE };
+}
 function findEntToAttrRelationship(ent, attr, context) {
     log("Finding Ent -> Attr relationship between \"" + ent.name + "\" and \"" + attr.name + "\"...");
     // Check for a direct relationship
@@ -1816,8 +1866,6 @@ function findEntToAttrRelationship(ent, attr, context) {
         // Fill in the attribute
         var entities = extractFromUnprojected(eveRelationship.unprojected, 0, 2, "link");
         var collections = findCommonCollections(entities);
-        console.log(collections);
-        console.log(entities);
         var collLinkID;
         if (collections.length > 0) {
             log("  Found One-Hop Relationship");
@@ -1859,6 +1907,7 @@ function findEntToAttrRelationship(ent, attr, context) {
                 nNode.attribute = nAttribute;
                 nNode.properties.push(Properties.ATTRIBUTE);
                 nNode.found = true;
+                implicitNodes.push(nNode);
             }
             // Project what we need to
             attribute.project = true;
@@ -1893,7 +1942,7 @@ function findCollToCollRelationship(collA, collB, context) {
         .select("collection entities", { collection: collB.collection.id, entity: ["collA", "entity"] }, "collB")
         .exec();
     // is there a relationship between things in both sets
-    var relationships = app_1.eve.query("relationships between " + collA.collection.displayName + " and " + collB.collection.displayName)
+    var eveRelationship = app_1.eve.query("relationships between " + collA.collection.displayName + " and " + collB.collection.displayName)
         .select("collection entities", { collection: collA.collection.id }, "collA")
         .select("directionless links", { entity: ["collA", "entity"] }, "links")
         .select("collection entities", { collection: collB.collection.id, entity: ["links", "link"] }, "collB")
@@ -1901,8 +1950,8 @@ function findCollToCollRelationship(collA, collB, context) {
         .aggregate("count", {}, "count")
         .project({ type: ["links", "link"], count: ["count", "count"] })
         .exec();
-    var maxRel = { count: 0 };
-    for (var _i = 0, _a = relationships.results; _i < _a.length; _i++) {
+    var maxRel = { type: "", count: 0 };
+    for (var _i = 0, _a = eveRelationship.results; _i < _a.length; _i++) {
         var result = _a[_i];
         if (result.count > maxRel.count)
             maxRel = result;
@@ -1911,9 +1960,36 @@ function findCollToCollRelationship(collA, collB, context) {
     // and we have two selects.
     var intersectionSize = intersection.unprojected.length / 2;
     if (maxRel.count > intersectionSize) {
-        // @TODO
-        log("  No relationship found");
-        return { type: RelationshipTypes.NONE };
+        /*
+        console.log(eveRelationship)
+        let entities = extractFromUnprojected(eveRelationship.unprojected,1,2,"link").filter((e) => e !== undefined);
+        let collections = findCommonCollections(entities);
+        console.log(entities);
+        console.log(collections)
+        console.log(findEveCollection(collections[0]));*/
+        log("  No relationship found1");
+        var nName = collA.name + "|" + collB.name;
+        var nToken = newToken(nName);
+        var nNode = newNode(nToken);
+        // Create a link eav
+        var entity = {
+            id: nName,
+            displayName: nName,
+            variable: collB.collection.variable,
+            value: collA.collection.variable,
+            project: false,
+            entityAttr: false,
+            entityVar: true,
+            valueVar: true,
+            node: nNode,
+            handled: false,
+        };
+        nNode.properties.push(Properties.ENTITY);
+        nNode.entity = entity;
+        nNode.found = true;
+        var relationship = { type: RelationshipTypes.ONEHOP, nodes: [collA, collB], implicitNodes: [nNode] };
+        nNode.relationships.push(relationship);
+        return relationship;
     }
     else if (intersectionSize > 0) {
         log(" Found Intersection relationship.");
@@ -1923,12 +1999,12 @@ function findCollToCollRelationship(collA, collB, context) {
         return { type: RelationshipTypes.INTERSECTION, nodes: [collA, collB] };
     }
     else if (maxRel.count === 0 && intersectionSize === 0) {
-        log("  No relationship found");
+        log("  No relationship found2");
         return { type: RelationshipTypes.NONE };
     }
     else {
         // @TODO
-        log("  No relationship found");
+        log("  No relationship found3");
         return { type: RelationshipTypes.NONE };
     }
 }
@@ -2276,7 +2352,12 @@ function formQuery(node) {
         if (allArgsFound) {
             log("Building function term for: " + node.name);
             var groupNode = node.children[1].children[0];
-            groupNode.collection.handled = false;
+            if (groupNode.hasProperty(Properties.COLLECTION)) {
+                groupNode.collection.handled = false;
+            }
+            else if (groupNode.hasProperty(Properties.ATTRIBUTE)) {
+                groupNode.attribute.handled = false;
+            }
             var subquery = query;
             var query2 = formQuery(groupNode);
             query = newQuery();
@@ -2331,7 +2412,7 @@ function formQuery(node) {
         // project if necessary
         if (node.attribute.project) {
             var projectAttribute = {
-                name: attr.displayName,
+                name: attr.displayName.replace(/ /g, ''),
                 value: attr.variable,
                 variable: true
             };
@@ -2373,15 +2454,25 @@ function formQuery(node) {
     if (node.hasProperty(Properties.ENTITY) && !node.entity.handled) {
         log("Building entity term for: " + node.name);
         var entity = node.entity;
+        var fields = [];
         var entityField = {
             name: "entity",
-            value: entity.id,
-            variable: false,
+            value: entity.entityVar ? entity.variable : entity.id,
+            variable: entity.entityVar,
         };
+        fields.push(entityField);
+        if (entity.entityVar) {
+            var valueField = {
+                name: "value",
+                value: entity.valueVar ? entity.value : entity.id,
+                variable: entity.valueVar,
+            };
+            fields.push(valueField);
+        }
         var term = {
             type: "select",
             table: "entity eavs",
-            fields: [entityField],
+            fields: fields,
         };
         query.terms.push(term);
         // project if necessary

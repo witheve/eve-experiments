@@ -1998,7 +1998,7 @@ runtime.define("average", { aggregate: true, result: "average" }, function (prev
     prev.average = prev.sum / prev.count;
     return prev;
 });
-runtime.define("lowercase", { result: "lowercase" }, function (text) {
+runtime.define("lowercase", { result: "result" }, function (text) {
     if (typeof text === "string") {
         return { result: text.toLowerCase() };
     }

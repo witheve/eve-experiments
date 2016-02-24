@@ -195,9 +195,9 @@ function updateEntityAttributes(event, elem) {
 }
 function sortTable(event, elem) {
     var table = elem.table, _a = elem.field, field = _a === void 0 ? undefined : _a, _b = elem.direction, direction = _b === void 0 ? undefined : _b;
-    console.log(table.state, field, direction);
     if (field === undefined && direction === undefined) {
         field = event.target.value;
+        direction = -1;
     }
     app_1.dispatch("sort table", { state: table.state, field: field, direction: direction }).commit();
 }
@@ -701,7 +701,7 @@ function tableBody(elem) {
         };
     }
     // Sort rows
-    if (sortable && state.sortField) {
+    if (state.sortField && state.sortDirection) {
         rows.sort(sortByFieldValue(state.sortField, state.sortDirection));
     }
     for (var _e = 0; _e < groups.length; _e++) {
@@ -737,7 +737,7 @@ function tableBody(elem) {
                             keydown: blurOnEnter,
                             blur: editGroup
                         }),
-                        { c: "flex-column group", children: [] }
+                        { c: "flex-column flex-grow group", children: [] }
                     ]
                 };
                 if (group) {
@@ -780,12 +780,22 @@ function tableBody(elem) {
 exports.tableBody = tableBody;
 function tableHeader(elem) {
     var state = elem.state, fields = elem.fields, _a = elem.groups, groups = _a === void 0 ? [] : _a, _b = elem.sortable, sortable = _b === void 0 ? false : _b, data = elem.data;
+    fields = fields.slice();
+    // Strip grouped fields out of display fields -- the former implies the latter and must be handled first
+    for (var _i = 0; _i < groups.length; _i++) {
+        var field = groups[_i];
+        var fieldIx = fields.indexOf(field);
+        if (fieldIx !== -1) {
+            fields.splice(fieldIx, 1);
+        }
+    }
+    var addField = elem.addField, removeField = elem.removeField;
     // Build header
     elem.t = "header";
     elem.c = "table-header " + (elem.c || "");
     elem.children = [];
-    for (var _i = 0, _c = groups.concat(fields); _i < _c.length; _i++) {
-        var field = _c[_i];
+    for (var _c = 0, _d = groups.concat(fields); _c < _d.length; _c++) {
+        var field = _d[_c];
         var isActive = field === state.sortField;
         var direction = isActive ? state.sortDirection : 0;
         var klass = "sort-toggle " + (isActive && direction < 0 ? "ion-arrow-up-b" : "ion-arrow-down-b") + " " + (isActive ? "active" : "");
@@ -793,12 +803,15 @@ function tableHeader(elem) {
                 value({ c: "text", text: field, data: data, autolink: false }),
                 { c: "flex-grow" },
                 { c: "controls", children: [
-                        sortable ? { c: klass, table: elem, field: field, direction: -direction || 1, click: sortTable } : undefined
+                        sortable ? { c: klass, table: elem, field: field, direction: -direction || 1, click: sortTable } : undefined,
+                        removeField ? { c: "ion-close-round", table: elem, field: field, click: removeField } : undefined
                     ] }
             ] });
     }
     ;
-    elem.children.push({ c: "controls", children: [] });
+    elem.children.push({ c: "controls", children: [
+            addField ? { c: "ion-plus-round add-field-btn", table: elem, click: addField } : undefined
+        ] });
     return elem;
 }
 function tableAdderRow(elem) {
@@ -878,9 +891,8 @@ function changeEntityAdder(event, elem) {
         }
     }
 }
-function submitTableAdder(event, elem) {
-    var row = elem.row, subject = elem.subject, entity = elem.entity, fieldMap = elem.fieldMap, collections = elem.collections;
-    var chain = app_1.dispatch("rerender");
+function createFact(chain, row, _a) {
+    var subject = _a.subject, entity = _a.entity, fieldMap = _a.fieldMap, collections = _a.collections;
     var name = row[subject];
     if (!entity) {
         entity = ui_1.asEntity(name);
@@ -903,6 +915,10 @@ function submitTableAdder(event, elem) {
             chain.dispatch("add sourced eav", { entity: entity, attribute: "is a", value: coll });
         }
     }
+}
+function submitTableAdder(event, elem) {
+    var chain = app_1.dispatch("rerender");
+    createFact(chain, elem.row, elem);
     elem.state.adder = {};
     console.log(chain);
     chain.commit();
@@ -912,6 +928,19 @@ function updateRowAttribute(event, elem) {
     var subject = tableElem.subject, fieldMap = tableElem.fieldMap;
     var entity = row[subject];
     app_1.dispatch("update entity attribute", { entity: entity, attribute: fieldMap[field], prev: row[field], value: event.detail }).commit();
+}
+function commitChanges(event, elem) {
+    // @TODO: Refactor state.adder into state.adders[]
+    // @TODO; Submit all adder rows
+    // @TODO: Batch changes to existing rows in editCell into state.changes[]
+    // @TODO: Submit all batched cell changes
+    // @TODO: Update resolveValue to use new string semantics
+    var tableElem = elem.table;
+    var state = tableElem.state;
+    var chain = app_1.dispatch("rerender");
+    createFact(chain, state.adder, tableElem);
+    console.log(chain);
+    chain.commit();
 }
 function table(elem) {
     var state = elem.state, rows = elem.rows, fields = elem.fields, groups = elem.groups, disabled = elem.disabled, sortable = elem.sortable, editCell = elem.editCell, data = elem.data;
@@ -936,7 +965,8 @@ function mappedTable(elem) {
     elem.children = [
         tableHeader({ state: state, fields: fields, groups: groups, sortable: sortable, data: data }),
         tableBody({ rows: rows, state: state, fields: fields, groups: groups, disabled: disabled, sortable: sortable, subject: subject, fieldMap: fieldMap, editCell: updateRowAttribute, data: data }),
-        tableAdderRow({ row: state.adder, state: state, fields: fields, disabled: adderDisabled, subject: subject, fieldMap: fieldMap, collections: collections, change: adderChanged, submit: submitTableAdder })
+        tableAdderRow({ row: state.adder, state: state, fields: fields, disabled: adderDisabled, subject: subject, fieldMap: fieldMap, collections: collections, change: adderChanged, confirm: false }),
+        { c: "ion-checkmark-round commit-btn", row: state.adder, table: elem, click: commitChanges }
     ];
     return elem;
 }
@@ -1021,6 +1051,7 @@ var directoryTileLayouts = [
 ];
 var directoryTileStyles = ["tile-style-1", "tile-style-2", "tile-style-3", "tile-style-4", "tile-style-5", "tile-style-6", "tile-style-7"];
 function directory(elem) {
+    var key = "directory|home"; // @TODO: FIXME
     var MAX_ENTITIES_BEFORE_OVERFLOW = 14;
     var rawEntities = elem.entities, _a = elem.data, data = _a === void 0 ? undefined : _a;
     var _b = classifyEntities(rawEntities), systems = _b.systems, collections = _b.collections, entities = _b.entities, scores = _b.scores, relatedCounts = _b.relatedCounts, wordCounts = _b.wordCounts, childCounts = _b.childCounts;
@@ -1028,12 +1059,16 @@ function directory(elem) {
     entities.sort(sortByScores);
     collections.sort(sortByScores);
     systems.sort(sortByScores);
+    var collectionTableState = ui_1.uiState.widget.table[(key + "|collections table")] || { sortField: "score", sortDirection: -1, adder: undefined };
+    ui_1.uiState.widget.table[(key + "|collections table")] = collectionTableState;
+    var entityTableState = ui_1.uiState.widget.table[(key + "|entities table")] || { sortField: "score", sortDirection: -1, adder: undefined };
+    ui_1.uiState.widget.table[(key + "|entities table")] = entityTableState;
     // Link to entity
     // Peek with most significant statistic (e.g. 13 related; or 14 childrenpages; or 5000 words)
     // Slider pane will all statistics
     // Click opens popup preview
-    function formatTile(entity) {
-        var stats = { best: "", links: relatedCounts[entity], pages: childCounts[entity], words: wordCounts[entity] };
+    function getStats(entity) {
+        var stats = { name: entity, best: "", links: relatedCounts[entity], pages: childCounts[entity], words: wordCounts[entity] };
         var maxContribution = 0;
         for (var stat in stats) {
             if (!statWeights[stat])
@@ -1044,51 +1079,42 @@ function directory(elem) {
                 stats.best = stat;
             }
         }
+        return stats;
+    }
+    function formatTile(entity) {
+        var stats = getStats(entity);
         return { size: scores[entity], stats: stats, children: [
                 link({ entity: entity, data: data })
             ] };
     }
-    function formatOverflow(key, entities, skipChildren) {
-        if (skipChildren === void 0) { skipChildren = false; }
-        var rows = [];
-        for (var _i = 0; _i < entities.length; _i++) {
-            var entity_2 = entities[_i];
-            rows.push({
-                name: entity_2,
-                score: scores[entity_2],
-                words: wordCounts[entity_2],
-                links: relatedCounts[entity_2],
-                pages: childCounts[entity_2]
-            });
-            if (skipChildren)
-                delete rows[rows.length - 1].pages;
+    function formatList(name, entities, state) {
+        var sortOpts = [];
+        for (var _i = 0, _a = ["score", "links", "words"]; _i < _a.length; _i++) {
+            var field = _a[_i];
+            sortOpts.push({ t: "option", text: resolveName(field), value: field, selected: field === state.sortField });
         }
-        var state = {};
-        var fields = getFields({ example: rows[0], blacklist: ["__id"] });
-        return table({ c: "overflow-list", key: key, rows: rows, fields: fields, sortable: true, state: state, data: data });
+        return { c: "directory-list flex-grow flex-row", children: [
+                collapsible({ c: "flex-grow", key: key + "|" + name + " collapsible", header: { text: "Show all " + name }, open: false, children: [
+                        { c: "flex-row", children: [
+                                { c: "table-wrapper", children: [
+                                        tableBody({ rows: entities.map(getStats), fields: ["name"].concat([state.sortField] || []), sortable: false, state: state, data: data }),
+                                    ] },
+                                { t: "select", c: "select-sort-field select", value: state.sortField, table: { state: state }, children: sortOpts, change: sortTable },
+                            ] }
+                    ] })
+            ] };
     }
-    // @TODO: Put formatOverflow into a collapsed container.
+    var highlights = collections.slice(0, 15).concat(entities.slice(0, 8));
     return { c: "directory flex-column", children: [
-            { t: "h2", text: "Collections" },
-            exports.masonry({ c: "directory-listing", layouts: directoryTileLayouts, styles: directoryTileStyles, children: collections.map(formatTile) }),
-            { t: "h2", text: "Entities" },
-            exports.masonry({ c: "directory-listing", layouts: directoryTileLayouts, styles: directoryTileStyles, children: entities.slice(0, MAX_ENTITIES_BEFORE_OVERFLOW).map(formatTile) }),
-            collapsible({
-                key: elem.key + "|directory entities collapsible",
-                header: { text: "Show all entities..." },
-                children: [
-                    //tableFilter({key: `${elem.key}|directory entities overflow`, sortFields: ["name", "score", "words", "links"]}),
-                    formatOverflow(elem.key + "|directory entities overflow", entities, true)
-                ],
-                open: false
-            }),
-            { t: "h2", text: "Internals" },
-            collapsible({
-                key: elem.key + "|directory systems collapsible",
-                header: { text: "Show all internal entities..." },
-                children: [formatOverflow(elem.key + "|directory systems overflow", systems)],
-                open: false
-            }),
+            { t: "p", children: [
+                    { t: "span", text: "Welcome to Eve. First time users should consider reading the " }, { t: "a", text: "tutorial", href: "/tutorial/" + utils_1.builtinId("tutorial") }, { t: "span", text: "." },
+                ] },
+            { t: "h2", text: "Cards of Interest" },
+            exports.masonry({ c: "directory-highlights", rowSize: 10, layouts: directoryTileLayouts, styles: directoryTileStyles, children: highlights.map(formatTile) }),
+            { c: "directory-lists flex-row", children: [
+                    formatList("collections", collections, collectionTableState),
+                    formatList("entities", entities, entityTableState)
+                ] }
         ] };
 }
 exports.directory = directory;

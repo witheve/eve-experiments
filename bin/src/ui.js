@@ -46,7 +46,7 @@ function asEntity(raw) {
         return;
     if (app_1.eve.findOne("entity", { entity: cleaned }))
         return cleaned;
-    cleaned = cleaned.toLowerCase();
+    cleaned = NLQueryParser_1.normalizeString(cleaned);
     if (app_1.eve.findOne("entity", { entity: cleaned }))
         return cleaned; // This can be removed if we remove caps from ids. UUIDv4 does not use caps in ids
     var _a = (app_1.eve.findOne("index name", { name: cleaned }) || {}).id, id = _a === void 0 ? undefined : _a;
@@ -81,11 +81,13 @@ function inferRepresentation(search, baseParams) {
     var entityId = asEntity(search);
     var cleaned = (search && ("" + search).trim().toLowerCase()) || "";
     if (entityId || cleaned.length === 0) {
+        var rep = "entity";
         params.entity = entityId || utils_1.builtinId("home");
         if (params.entity === utils_1.builtinId("home")) {
+            rep = "directory";
             params.unwrapped = true;
         }
-        return { rep: "entity", params: params };
+        return { rep: rep, params: params };
     }
     var _a = cleaned.split("|"), rawContent = _a[0], rawParams = _a[1];
     var parsedParams = getCellParams(rawContent, rawParams);
@@ -252,12 +254,12 @@ app_1.handle("set popout", function (changes, info) {
     var children = app_1.eve.find("ui pane parent", { parent: parentId });
     var parent = app_1.eve.findOne("ui pane", { pane: parentId });
     var reusing = false;
-    if (parent && parent.kind === PANE.POPOUT) {
-        reusing = true;
-        paneId = parentId;
-        parentId = app_1.eve.findOne("ui pane parent", { pane: parentId }).parent;
-    }
-    else if (children.length) {
+    // if(parent && parent.kind === PANE.POPOUT) {
+    //   reusing = true;
+    //   paneId = parentId;
+    //   parentId = eve.findOne("ui pane parent", {pane: parentId}).parent;
+    // } else 
+    if (children.length) {
         //check if there is already a child popout
         for (var _i = 0; _i < children.length; _i++) {
             var childRel = children[_i];
@@ -309,10 +311,11 @@ app_1.handle("ui toggle search plan", function (changes, _a) {
     state.plan = !state.plan;
 });
 app_1.handle("add sourced eav", function (changes, eav) {
-    var entity = eav.entity, attribute = eav.attribute, value = eav.value, source = eav.source, forceEntity = eav.forceEntity;
+    var entity = eav.entity, attrName = eav.attribute, value = eav.value, source = eav.source, forceEntity = eav.forceEntity;
     if (!source) {
         source = utils_1.uuid();
     }
+    var attribute = NLQueryParser_1.normalizeString(attrName);
     var valueId = asEntity(value);
     var coerced = utils_1.coerceInput(value);
     var strValue = value.toString().trim();
@@ -335,7 +338,9 @@ app_1.handle("add sourced eav", function (changes, eav) {
     else {
         value = coerced;
     }
-    changes.add("sourced eav", { entity: entity, attribute: attribute, value: value, source: source });
+    changes.add("sourced eav", { entity: entity, attribute: attribute, value: value, source: source })
+        .remove("display name", { id: attribute })
+        .add("display name", { id: attribute, name: attrName });
 });
 app_1.handle("remove sourced eav", function (changes, eav) {
     changes.remove("sourced eav", eav);
@@ -499,12 +504,16 @@ app_1.handle("update entity attribute", function (changes, _a) {
     changes.add("sourced eav", { entity: entity, attribute: attribute, value: value, source: source });
 });
 app_1.handle("rename entity attribute", function (changes, _a) {
-    var entity = _a.entity, attribute = _a.attribute, prev = _a.prev, value = _a.value;
+    var entity = _a.entity, attrName = _a.attribute, prev = _a.prev, value = _a.value;
     // @FIXME: proper unique source id
     var _b = (app_1.eve.findOne("sourced eav", { entity: entity, attribute: prev, value: value }) || {}).source, source = _b === void 0 ? "<global>" : _b;
-    if (prev !== undefined)
-        changes.remove("sourced eav", { entity: entity, attribute: prev, value: value });
-    changes.add("sourced eav", { entity: entity, attribute: attribute, value: value, source: source });
+    var attribute = NLQueryParser_1.normalizeString(attrName);
+    if (prev !== undefined) {
+        changes.remove("sourced eav", { entity: entity, attribute: prev, value: value })
+            .remove("display name", { id: prev });
+    }
+    changes.add("sourced eav", { entity: entity, attribute: attribute, value: value, source: source })
+        .add("display name", { id: attribute, name: attrName });
 });
 app_1.handle("sort table", function (changes, _a) {
     var state = _a.state, field = _a.field, direction = _a.direction;
@@ -552,7 +561,7 @@ app_1.handle("remove entity", function (changes, _a) {
 //---------------------------------------------------------
 function root() {
     var panes = [];
-    for (var _i = 0, _a = app_1.eve.find("ui pane"); _i < _a.length; _i++) {
+    for (var _i = 0, _a = app_1.eve.find("ui pane", { kind: PANE.FULL }); _i < _a.length; _i++) {
         var paneId = _a[_i].pane;
         panes.push(pane(paneId));
     }
@@ -577,7 +586,7 @@ function root() {
             { t: "a", target: "_blank", href: "https://groups.google.com/forum/#!forum/eve-talk", text: "suggestions" },
             { t: "a", target: "_blank", href: "https://groups.google.com/forum/#!forum/eve-talk", text: "discussion" },
         ] });
-    return { c: "wiki-root", id: "root", children: panes, click: removePopup };
+    return { c: "wiki-root", id: "root", children: panes };
 }
 exports.root = root;
 function hideBanner(event, elem) {
@@ -755,24 +764,21 @@ function pane(paneId) {
     }
     var scroller = content;
     if (kind === PANE.FULL) {
-        scroller = { c: "scroller", children: [
-                { c: "top-scroll-fade" },
-                content,
-                { c: "bottom-scroll-fade" },
-            ] };
+        var panes = app_1.eve.find("ui pane").filter(function (pane) { return pane.kind !== PANE.FULL; });
+        var children = [content].concat(panes.map(function (p) { return pane(p.pane); }));
+        scroller = { c: "scroller", children: children };
     }
-    var pane = { c: "wiki-pane " + (klass || ""), paneId: paneId, children: [header, disambiguation, scroller, footer] };
+    var curPane = { c: "wiki-pane " + (klass || ""), paneId: paneId, children: [header, disambiguation, scroller, footer] };
     var pos = app_1.eve.findOne("ui pane position", { pane: paneId });
     if (pos) {
-        pane.style = "left: " + (isNaN(pos.x) ? pos.x : pos.x + "px") + "; top: " + (isNaN(pos.y) ? pos.y : (pos.y + 20) + "px") + ";";
     }
     if (captureClicks) {
-        pane.click = uitk_1.preventDefault;
+        curPane.click = uitk_1.preventDefault;
     }
     if (exports.uiState.prompt.open && exports.uiState.prompt.paneId === paneId) {
-        pane.children.push({ c: "shade", paneId: paneId, click: closePrompt }, exports.uiState.prompt.prompt(paneId));
+        curPane.children.push({ c: "shade", paneId: paneId, click: closePrompt }, exports.uiState.prompt.prompt(paneId));
     }
-    return pane;
+    return curPane;
 }
 exports.pane = pane;
 function search(search, paneId) {
@@ -1797,10 +1803,10 @@ function tile(elem) {
         klass += " active";
     }
     elem.c = klass;
-    elem.click = activateTile;
+    // elem.click = activateTile;
     elem.children = [
         { c: "tile-content-wrapper", children: elem.children },
-        // {c: "edit ion-edit", click: activateTile, cardId, tileId, entityId, source},
+        { c: "edit ion-edit", click: activateTile, cardId: cardId, tileId: tileId, entityId: entityId, source: source },
         { c: "controls", children: [
                 !elem.removeOnly ? { c: "ion-checkmark submit", click: submitActiveTile, cardId: cardId, attribute: attribute, entityId: entityId, source: source, reverseEntityAndValue: reverseEntityAndValue } : undefined,
                 !elem.submitOnly ? { c: "ion-backspace cancel", click: removeActiveTile, cardId: cardId, attribute: attribute, entityId: entityId, source: source } : undefined,
@@ -2200,7 +2206,7 @@ function entityTilesUI(entityId, paneId, cardId) {
         rows.push({ c: "flex-row row", children: [tiles["is a"][0]] });
     }
     var state = exports.uiState.widget.attributes[entityId] || {};
-    return { c: "tiles", children: rows };
+    return { c: "tile-scroll", children: [{ c: "tiles", children: rows }] };
 }
 exports.entityTilesUI = entityTilesUI;
 function attributesUIAutocompleteOptions(isEntity, parsed, text, params, entityId) {
@@ -2590,7 +2596,8 @@ var _prepare = {
         //return {rows: results, fields, state, groups: groupings, sortable: true, data: params.data};
     },
     directory: function (results, params) {
-        var entities = getEntitiesFromResults(results, { fields: params.field ? [params.field] : undefined });
+        //let entities = getEntitiesFromResults(results, {fields: params.field ? [params.field] : undefined});
+        var entities = [utils_1.builtinId("entity")];
         if (entities.length === 1) {
             var collection = entities[0];
             entities.length = 0;
