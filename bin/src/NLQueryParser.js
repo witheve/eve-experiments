@@ -274,38 +274,39 @@ var Properties;
 (function (Properties) {
     // Node properties
     Properties[Properties["ROOT"] = 0] = "ROOT";
-    // EVE attributes
+    // EVE types
     Properties[Properties["COLLECTION"] = 1] = "COLLECTION";
     Properties[Properties["ENTITY"] = 2] = "ENTITY";
     Properties[Properties["ATTRIBUTE"] = 3] = "ATTRIBUTE";
-    // Function properties
     Properties[Properties["FUNCTION"] = 4] = "FUNCTION";
-    Properties[Properties["OUTPUT"] = 5] = "OUTPUT";
-    Properties[Properties["INPUT"] = 6] = "INPUT";
-    Properties[Properties["ARGUMENT"] = 7] = "ARGUMENT";
-    Properties[Properties["AGGREGATE"] = 8] = "AGGREGATE";
-    Properties[Properties["CALCULATE"] = 9] = "CALCULATE";
-    Properties[Properties["OPERATOR"] = 10] = "OPERATOR";
+    Properties[Properties["QUANTITY"] = 5] = "QUANTITY";
+    Properties[Properties["STRING"] = 6] = "STRING";
+    // Function properties  
+    Properties[Properties["OUTPUT"] = 7] = "OUTPUT";
+    Properties[Properties["INPUT"] = 8] = "INPUT";
+    Properties[Properties["ARGUMENT"] = 9] = "ARGUMENT";
+    Properties[Properties["AGGREGATE"] = 10] = "AGGREGATE";
+    Properties[Properties["CALCULATE"] = 11] = "CALCULATE";
+    Properties[Properties["OPERATOR"] = 12] = "OPERATOR";
     // Token properties
-    Properties[Properties["QUANTITY"] = 11] = "QUANTITY";
-    Properties[Properties["PROPER"] = 12] = "PROPER";
-    Properties[Properties["PLURAL"] = 13] = "PLURAL";
-    Properties[Properties["POSSESSIVE"] = 14] = "POSSESSIVE";
-    Properties[Properties["BACKRELATIONSHIP"] = 15] = "BACKRELATIONSHIP";
-    Properties[Properties["COMPARATIVE"] = 16] = "COMPARATIVE";
-    Properties[Properties["SUPERLATIVE"] = 17] = "SUPERLATIVE";
-    Properties[Properties["PRONOUN"] = 18] = "PRONOUN";
-    Properties[Properties["SEPARATOR"] = 19] = "SEPARATOR";
-    Properties[Properties["CONJUNCTION"] = 20] = "CONJUNCTION";
-    Properties[Properties["QUOTED"] = 21] = "QUOTED";
-    Properties[Properties["SETTER"] = 22] = "SETTER";
-    Properties[Properties["SUBSUMED"] = 23] = "SUBSUMED";
-    Properties[Properties["COMPOUND"] = 24] = "COMPOUND";
+    Properties[Properties["PROPER"] = 13] = "PROPER";
+    Properties[Properties["PLURAL"] = 14] = "PLURAL";
+    Properties[Properties["POSSESSIVE"] = 15] = "POSSESSIVE";
+    Properties[Properties["BACKRELATIONSHIP"] = 16] = "BACKRELATIONSHIP";
+    Properties[Properties["COMPARATIVE"] = 17] = "COMPARATIVE";
+    Properties[Properties["SUPERLATIVE"] = 18] = "SUPERLATIVE";
+    Properties[Properties["PRONOUN"] = 19] = "PRONOUN";
+    Properties[Properties["SEPARATOR"] = 20] = "SEPARATOR";
+    Properties[Properties["CONJUNCTION"] = 21] = "CONJUNCTION";
+    Properties[Properties["QUOTED"] = 22] = "QUOTED";
+    Properties[Properties["SETTER"] = 23] = "SETTER";
+    Properties[Properties["SUBSUMED"] = 24] = "SUBSUMED";
+    Properties[Properties["COMPOUND"] = 25] = "COMPOUND";
     // Modifiers
-    Properties[Properties["NEGATES"] = 25] = "NEGATES";
-    Properties[Properties["GROUPING"] = 26] = "GROUPING";
-    Properties[Properties["IMPLICIT"] = 27] = "IMPLICIT";
-    Properties[Properties["STOPPARSE"] = 28] = "STOPPARSE";
+    Properties[Properties["NEGATES"] = 26] = "NEGATES";
+    Properties[Properties["GROUPING"] = 27] = "GROUPING";
+    Properties[Properties["IMPLICIT"] = 28] = "IMPLICIT";
+    Properties[Properties["STOPPARSE"] = 29] = "STOPPARSE";
 })(Properties || (Properties = {}));
 // take an input string, extract tokens
 function formToken(word) {
@@ -557,7 +558,7 @@ function singularize(word) {
     // split word at spaces
     var words = word.split(" ");
     if (words.length === 1) {
-        var specialCases = ["his", "times", "has", "downstairs", "its", "'s", "data", "are"];
+        var specialCases = ["his", "times", "has", "downstairs", "its", "'s", "data", "are", "was"];
         for (var _i = 0; _i < specialCases.length; _i++) {
             var specialCase = specialCases[_i];
             if (specialCase === word) {
@@ -1358,11 +1359,15 @@ function formTree(node, tree, context) {
         else if (node.fxn.type === FunctionTypes.FILTER) {
             // If an attribute is specified, create an attribute node for each one
             if (node.fxn.attribute !== undefined) {
-                for (var i = 0; i < node.fxn.fields.length; i++) {
-                    var nToken = newToken(node.fxn.attribute);
-                    var nNode = newNode(nToken);
-                    formTree(nNode, tree, context);
-                }
+                // LHS
+                var nToken = newToken(node.fxn.attribute);
+                var nNode = newNode(nToken);
+                formTree(nNode, tree, context);
+                // RHS
+                nToken = newToken(node.fxn.attribute);
+                nNode = newNode(nToken);
+                findAttribute(nNode, context);
+                addNodeToFunction(nNode, node, context);
             }
             else {
                 var orphans = context.found.filter(function (n) { return n.hasProperty(Properties.ATTRIBUTE); });
@@ -1716,7 +1721,7 @@ function findRelationship(nodeA, nodeB, context) {
     var relationship = { type: RelationshipTypes.NONE };
     if ((nodeA === nodeB) ||
         (context.stateFlags.insert) ||
-        (nodeA.hasProperty(Properties.QUANTITY) || nodeB.hasProperty(Properties.QUANTITY))) {
+        (nodeA.hasProperty(Properties.QUANTITY) && nodeB.hasProperty(Properties.QUANTITY))) {
         return relationship;
     }
     log("Finding relationship between \"" + nodeA.name + "\" and \"" + nodeB.name + "\"");
@@ -1724,6 +1729,9 @@ function findRelationship(nodeA, nodeB, context) {
     // 1) Collection 
     // 2) Entity 
     // 3) Attribute
+    // 4) Function
+    // 5) Quantity
+    // 6) String
     nodeA.properties.sort(function (a, b) { return a - b; });
     nodeB.properties.sort(function (a, b) { return a - b; });
     var nodes = [nodeA, nodeB].sort(function (a, b) { return a.properties[0] - b.properties[0]; });
@@ -1768,32 +1776,42 @@ function findRelationship(nodeA, nodeB, context) {
         }
     }
     return relationship;
-    /*
-    // If one node is an entity and the other is a collection
-    } else if (nodeA.hasProperty(Properties.COLLECTION) && nodeB.hasProperty(Properties.ENTITY)) {
-      relationship = findCollectionToEntRelationship(nodeA.collection, nodeB.entity);
-    } else if (nodeB.hasProperty(Properties.COLLECTION) && nodeA.hasProperty(Properties.ENTITY)) {
-      relationship = findCollectionToEntRelationship(nodeB.collection, nodeA.entity);
-    }*/
 }
-// e.g. "meetings john was in"
-function findAttrToAttrRelationship(nodeA, nodeB, context) {
-    log("Finding Attr -> Attr relationship between \"" + nodeA.name + "\" and \"" + nodeB.name + "\"...");
+// e.g. Corey's wife's age
+function findAttrToAttrRelationship(attrA, attrB, context) {
+    log("Finding Attr -> Attr relationship between \"" + attrA.name + "\" and \"" + attrB.name + "\"...");
+    console.log(attrA);
+    console.log(attrB);
+    if (attrA.hasProperty(Properties.QUANTITY)) {
+        var temp = attrA;
+        attrA = attrB;
+        attrB = temp;
+    }
+    // e.g. employees whose salary is 10
+    if (attrA.relationships.length > 0 && attrB.hasProperty(Properties.QUANTITY)) {
+        attrA.attribute.variable = "" + attrB.quantity;
+        attrA.attribute.attributeVar = false;
+        attrA.attribute.project = false;
+        return { type: RelationshipTypes.DIRECT, nodes: [attrA, attrB] };
+    }
+    else {
+        return { type: RelationshipTypes.NONE };
+    }
     // Check whether one of the attributes is an entity attribute
     var direct = false;
-    if (nodeA.hasProperty(Properties.POSSESSIVE)) {
+    if (attrA.hasProperty(Properties.POSSESSIVE)) {
         direct = true;
     }
-    else if (nodeB.hasProperty(Properties.POSSESSIVE)) {
-        var tNode = nodeA;
-        nodeA = nodeB;
-        nodeB = tNode;
+    else if (attrB.hasProperty(Properties.POSSESSIVE)) {
+        var tNode = attrA;
+        attrA = attrB;
+        attrB = tNode;
         direct = true;
     }
     if (direct) {
         log("  Found a direct relationship");
         // Create an entity attribute
-        var entityAttr = nodeA.attribute;
+        var entityAttr = attrA.attribute;
         var ent = {
             id: entityAttr.variable,
             displayName: entityAttr.variable,
@@ -1807,9 +1825,9 @@ function findAttrToAttrRelationship(nodeA, nodeB, context) {
         var nNode = newNode(nToken);
         nNode.entity = ent;
         ent.node = nNode;
-        nodeB.attribute.variable = nodeA.attribute.variable + "|" + nodeB.attribute.id;
-        nodeB.attribute.refs = [nNode];
-        return { type: RelationshipTypes.DIRECT, nodes: [nodeA, nodeB] };
+        attrB.attribute.variable = attrA.attribute.variable + "|" + attrB.attribute.id;
+        attrB.attribute.refs = [nNode];
+        return { type: RelationshipTypes.DIRECT, nodes: [attrA, attrB] };
     }
     return { type: RelationshipTypes.NONE };
 }

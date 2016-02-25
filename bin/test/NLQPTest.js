@@ -48,7 +48,7 @@ function parseTest(queryString, n) {
     console.log("Result");
     console.log(queryString);
     console.log(parseResult.query.toString());
-    console.log(executeQuery(parseResult.query).join("\n"));
+    console.log(executeQuery(parseResult.query)[0]);
     console.log("-------------------------------------------------------------------------------------------");
     console.log(timingDisplay);
     console.log("===========================================================================================");
@@ -124,14 +124,18 @@ var phrases = [
     // -------------------------------
     // These are queries that we had problems with in the past
     // make sure they always work
-    // -------------------------------//
+    // -------------------------------// 
+    //"ganymede discovered by",
     //"employees, salaries per department",
     /*
     "Corey's salary, department, and age",
     "Corey's wife's age, gender, and height",
     */
+    //"moons discovered by sir william herschel",
     // -------------------------------
-    "corey's wife's age"
+    //"moons of jupiter", //X
+    //"jupiter's moons", //X
+    "moons whose year discovered is 1610",
 ];
 /*
 let siriphrases = [
