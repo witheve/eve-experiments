@@ -16,6 +16,7 @@ function resolveId(maybeName) {
 }
 exports.resolveId = resolveId;
 function resolveValue(maybeValue) {
+    maybeValue = utils_1.coerceInput(maybeValue);
     if (typeof maybeValue !== "string")
         return maybeValue;
     var val = maybeValue.trim();
@@ -240,6 +241,13 @@ function toggleAddTile(event, elem) {
 function setTileAdder(event, elem) {
     app_1.dispatch("set tile adder", { key: elem.key, adder: elem.adder }).commit();
 }
+function closeCard(event, elem) {
+    app_1.dispatch("close card", { paneId: elem.paneId }).commit();
+}
+function navigateRoot(event, elem) {
+    var root = app_1.eve.findOne("ui pane", { kind: ui_1.PANE.FULL })["pane"];
+    app_1.dispatch("set pane", { paneId: root, contains: elem.entityId }).commit();
+}
 function entity(elem) {
     var entityId = elem.entity;
     var paneId = elem.data.paneId;
@@ -253,7 +261,10 @@ function entity(elem) {
     return { c: "entity " + (state.showAdd ? "adding" : ""), children: [
             { c: "header", children: [
                     { text: name },
-                    { c: "ion-android-add add-tile", click: toggleAddTile, key: key, entityId: entityId }
+                    { c: "flex-grow spacer" },
+                    { c: "control ion-ios-upload-outline", click: navigateRoot, entityId: entityId },
+                    { c: "control " + (state.showAdd ? "ion-android-remove" : "ion-android-add") + " add-tile", click: toggleAddTile, key: key, entityId: entityId },
+                    { c: "control ion-android-close", click: closeCard, paneId: paneId },
                 ] },
             adder,
             attrs,
@@ -296,7 +307,7 @@ function submitAdder(event, elem) {
     app_1.dispatch("submit tile adder", { key: elem.key, node: event.currentTarget.parentNode.parentNode.firstChild.firstChild }).commit();
 }
 function submitProperty(adder, state, node) {
-    if (!state.propertyProperty === undefined || !state.propertyValue === undefined)
+    if (state.propertyProperty === undefined || state.propertyValue === undefined)
         return;
     app_1.dispatch("add sourced eav", { entity: state.entityId, attribute: state.propertyProperty, value: state.propertyValue, forceEntity: true }).commit();
     state.propertyValue = undefined;
@@ -514,7 +525,12 @@ function link(elem) {
     var entity = elem.entity;
     var name = resolveName(entity);
     elem.c = (elem.c || "") + " entity link inline";
-    elem.text = elem.text || name;
+    if (!elem["nameAsChild"]) {
+        elem.text = elem.text || name;
+    }
+    else {
+        elem.children = [{ text: elem.text || name }];
+    }
     elem["link"] = elem["link"] || entity;
     elem.click = elem.click || navigate;
     elem["peek"] = elem["peek"] !== undefined ? elem["peek"] : true;
@@ -868,29 +884,6 @@ function tableAdderRow(elem) {
     return elem;
 }
 exports.tableAdderRow = tableAdderRow;
-function changeAttributeAdder(event, elem) {
-    var tableElem = elem.table, row = elem.row, field = elem.field;
-    row[elem.field] = resolveValue(getNodeContent(event.target));
-    app_1.dispatch("rerender");
-}
-function changeEntityAdder(event, elem) {
-    var tableElem = elem.table, row = elem.row, field = elem.field;
-    var subject = tableElem.subject, fieldMap = tableElem.fieldMap;
-    row[elem.field] = resolveValue(getNodeContent(event.target));
-    if (elem.field === subject) {
-        // @NOTE: Should this really be done by inserting "= " when the input is focused?
-        var entityId = ui_1.asEntity(resolveValue(row[subject]));
-        if (entityId) {
-            for (var field_5 in fieldMap) {
-                var _a = (app_1.eve.findOne("entity eavs", { entity: entityId, attribute: fieldMap[field_5] }) || {}).value, value_1 = _a === void 0 ? undefined : _a;
-                if (!row[field_5] && value_1 !== undefined) {
-                    row[field_5] = value_1;
-                }
-            }
-            app_1.dispatch("rerender");
-        }
-    }
-}
 function createFact(chain, row, _a) {
     var subject = _a.subject, entity = _a.entity, fieldMap = _a.fieldMap, collections = _a.collections;
     var name = row[subject];
@@ -916,31 +909,128 @@ function createFact(chain, row, _a) {
         }
     }
 }
-function submitTableAdder(event, elem) {
-    var chain = app_1.dispatch("rerender");
-    createFact(chain, elem.row, elem);
-    elem.state.adder = {};
-    console.log(chain);
-    chain.commit();
+function tableStateValid(tableElem) {
+    var state = tableElem.state, fields = tableElem.fields, _a = tableElem.groups, groups = _a === void 0 ? [] : _a;
+    // A new adder is added every time the previous adder was changes, so the last one is empty.
+    var adders = state.adders.slice(0, -1);
+    // Ensure all batched changes are valid before committing any of them.
+    for (var _i = 0; _i < adders.length; _i++) {
+        var adder = adders[_i];
+        for (var _b = 0, _c = fields.concat(groups); _b < _c.length; _b++) {
+            var field = _c[_b];
+            if (adder[field] === undefined || adder[field] === "")
+                return false;
+        }
+    }
+    for (var _d = 0, _e = state.changes; _d < _e.length; _d++) {
+        var change = _e[_d];
+        console.log(change, change.value);
+        if (change.value === undefined || change.value === "")
+            return false;
+    }
+    return true;
+}
+function manageAdders(state, row, field) {
+    if (row[field] !== undefined && row[field] !== "") {
+        if (row === state.adders[state.adders.length - 1]) {
+            // We added a value to the blank adder and need to push a new adder
+            state.adders.push({});
+        }
+    }
+    else {
+        var ix = 0;
+        while (ix < state.adders.length - 1) {
+            var adder = state.adders[ix];
+            var gc = true;
+            for (var field_5 in adder) {
+                if (adder[field_5] !== undefined && adder[field_5] !== "") {
+                    gc = false;
+                    break;
+                }
+            }
+            if (gc) {
+                state.adders.splice(ix, 1);
+            }
+            else {
+                ix++;
+            }
+        }
+    }
+}
+function changeAttributeAdder(event, elem) {
+    var tableElem = elem.table, row = elem.row, field = elem.field;
+    var state = tableElem.state;
+    row[field] = resolveValue(getNodeContent(event.target));
+    manageAdders(state, row, field);
+    app_1.dispatch("rerender").commit();
+}
+function changeEntityAdder(event, elem) {
+    var tableElem = elem.table, row = elem.row, field = elem.field;
+    var state = tableElem.state, subject = tableElem.subject, fieldMap = tableElem.fieldMap;
+    row[field] = resolveValue(getNodeContent(event.target));
+    if (field === subject) {
+        // @NOTE: Should this really be done by inserting "= " when the input is focused?
+        var entityId = ui_1.asEntity(resolveValue(row[subject]));
+        if (entityId) {
+            for (var field_6 in fieldMap) {
+                var _a = (app_1.eve.findOne("entity eavs", { entity: entityId, attribute: fieldMap[field_6] }) || {}).value, value_1 = _a === void 0 ? undefined : _a;
+                if (!row[field_6] && value_1 !== undefined) {
+                    row[field_6] = value_1;
+                }
+            }
+        }
+    }
+    manageAdders(state, row, field);
+    app_1.dispatch("rerender").commit();
 }
 function updateRowAttribute(event, elem) {
     var field = elem.field, row = elem.row, tableElem = elem.table;
-    var subject = tableElem.subject, fieldMap = tableElem.fieldMap;
-    var entity = row[subject];
-    app_1.dispatch("update entity attribute", { entity: entity, attribute: fieldMap[field], prev: row[field], value: event.detail }).commit();
+    var state = tableElem.state, subject = tableElem.subject, fieldMap = tableElem.fieldMap;
+    var value = resolveValue(event.detail);
+    var change;
+    for (var _i = 0, _a = state.changes; _i < _a.length; _i++) {
+        var cur = _a[_i];
+        if (cur.field === field && cur.prev === row[field] && cur.row === row) {
+            change = cur;
+            break;
+        }
+    }
+    if (!change) {
+        change = { field: field, prev: row[field], row: row, value: value };
+        state.changes.push(change);
+    }
+    else {
+        change.value = value;
+    }
+    console.log(state);
+    app_1.dispatch("rerender").commit();
 }
 function commitChanges(event, elem) {
-    // @TODO: Refactor state.adder into state.adders[]
-    // @TODO; Submit all adder rows
     // @TODO: Batch changes to existing rows in editCell into state.changes[]
     // @TODO: Submit all batched cell changes
     // @TODO: Update resolveValue to use new string semantics
     var tableElem = elem.table;
-    var state = tableElem.state;
+    var subject = tableElem.subject, fieldMap = tableElem.fieldMap, state = tableElem.state;
     var chain = app_1.dispatch("rerender");
-    createFact(chain, state.adder, tableElem);
-    console.log(chain);
-    chain.commit();
+    // A new adder is added every time the previous adder was changes, so the last one is empty.
+    var adders = state.adders.slice(0, -1);
+    if (tableStateValid(tableElem)) {
+        for (var _i = 0; _i < adders.length; _i++) {
+            var adder = adders[_i];
+            createFact(chain, adder, tableElem);
+        }
+        for (var _a = 0, _b = state.changes; _a < _b.length; _a++) {
+            var _c = _b[_a], field = _c.field, prev = _c.prev, row = _c.row, value_2 = _c.value;
+            var entity_2 = row[subject];
+            app_1.dispatch("update entity attribute", { entity: entity_2, attribute: fieldMap[field], prev: prev, value: value_2 }).commit();
+        }
+        state.adders = [{}];
+        state.changes = [];
+        chain.commit();
+    }
+    else {
+        console.warn("One or more changes is invalid, so all changes have not been committed");
+    }
 }
 function table(elem) {
     var state = elem.state, rows = elem.rows, fields = elem.fields, groups = elem.groups, disabled = elem.disabled, sortable = elem.sortable, editCell = elem.editCell, data = elem.data;
@@ -955,18 +1045,32 @@ exports.table = table;
 function mappedTable(elem) {
     var state = elem.state, entity = elem.entity, subject = elem.subject, fieldMap = elem.fieldMap, collections = elem.collections, data = elem.data;
     // If we're mapped to an entity search we can only add new attributes to that entity
-    if (entity && state.adder[subject] !== entity) {
-        state.adder[subject] = entity;
+    for (var _i = 0, _a = state.adders; _i < _a.length; _i++) {
+        var adder = _a[_i];
+        if (entity && adder[subject] !== entity) {
+            adder[subject] = entity;
+        }
     }
-    var rows = elem.rows, fields = elem.fields, groups = elem.groups, _a = elem.disabled, disabled = _a === void 0 ? [subject] : _a, _b = elem.sortable, sortable = _b === void 0 ? true : _b;
+    var rows = elem.rows, fields = elem.fields, groups = elem.groups, _b = elem.disabled, disabled = _b === void 0 ? [subject] : _b, _c = elem.sortable, sortable = _c === void 0 ? true : _c;
     var adderChanged = entity ? changeAttributeAdder : changeEntityAdder;
     var adderDisabled = entity ? [subject] : undefined;
+    var stateValid = tableStateValid(elem);
     elem.c = "table-wrapper mapped-table " + (elem.c || "");
     elem.children = [
         tableHeader({ state: state, fields: fields, groups: groups, sortable: sortable, data: data }),
         tableBody({ rows: rows, state: state, fields: fields, groups: groups, disabled: disabled, sortable: sortable, subject: subject, fieldMap: fieldMap, editCell: updateRowAttribute, data: data }),
-        tableAdderRow({ row: state.adder, state: state, fields: fields, disabled: adderDisabled, subject: subject, fieldMap: fieldMap, collections: collections, change: adderChanged, confirm: false }),
-        { c: "ion-checkmark-round commit-btn", row: state.adder, table: elem, click: commitChanges }
+        { c: "table-adders", children: state.adders.map(function (row) { return tableAdderRow({
+                row: row,
+                state: state,
+                fields: fields,
+                disabled: adderDisabled,
+                confirm: false,
+                subject: subject,
+                fieldMap: fieldMap,
+                collections: collections,
+                change: adderChanged
+            }); }) },
+        { c: "ion-checkmark-round commit-btn " + (stateValid ? "valid" : "invalid"), table: elem, click: stateValid && commitChanges }
     ];
     return elem;
 }
@@ -1039,12 +1143,12 @@ function toggleCollapse(evt, elem) {
 }
 var directoryTileLayouts = [
     { size: 4, c: "big", format: function (elem) {
-            elem.children.unshift;
-            elem.children.push({ text: "(" + elem["stats"][elem["stats"].best] + " " + elem["stats"].best + ")" });
+            // elem.children.unshift
+            elem.children.push();
             return elem;
         } },
     { size: 2, c: "detailed", format: function (elem) {
-            elem.children.push({ text: "(" + elem["stats"][elem["stats"].best] + " " + elem["stats"].best + ")" });
+            elem.children.push();
             return elem;
         } },
     { size: 1, c: "normal", grouped: 2 }
@@ -1059,9 +1163,9 @@ function directory(elem) {
     entities.sort(sortByScores);
     collections.sort(sortByScores);
     systems.sort(sortByScores);
-    var collectionTableState = ui_1.uiState.widget.table[(key + "|collections table")] || { sortField: "score", sortDirection: -1, adder: undefined };
+    var collectionTableState = ui_1.uiState.widget.table[(key + "|collections table")] || { sortField: "score", sortDirection: -1, adders: [] };
     ui_1.uiState.widget.table[(key + "|collections table")] = collectionTableState;
-    var entityTableState = ui_1.uiState.widget.table[(key + "|entities table")] || { sortField: "score", sortDirection: -1, adder: undefined };
+    var entityTableState = ui_1.uiState.widget.table[(key + "|entities table")] || { sortField: "score", sortDirection: -1, adders: [] };
     ui_1.uiState.widget.table[(key + "|entities table")] = entityTableState;
     // Link to entity
     // Peek with most significant statistic (e.g. 13 related; or 14 childrenpages; or 5000 words)
@@ -1084,7 +1188,7 @@ function directory(elem) {
     function formatTile(entity) {
         var stats = getStats(entity);
         return { size: scores[entity], stats: stats, children: [
-                link({ entity: entity, data: data })
+                link({ entity: entity, data: data, nameAsChild: true })
             ] };
     }
     function formatList(name, entities, state) {
@@ -1104,16 +1208,27 @@ function directory(elem) {
                     ] })
             ] };
     }
-    var highlights = collections.slice(0, 15).concat(entities.slice(0, 8));
+    collections = collections.filter(function (coll) { return ui_1.asEntity("test data") !== coll; });
+    var highlights = collections.slice(0, 4).concat(entities.slice(0, 4));
     return { c: "directory flex-column", children: [
-            { t: "p", children: [
-                    { t: "span", text: "Welcome to Eve. First time users should consider reading the " }, { t: "a", text: "tutorial", href: "/tutorial/" + utils_1.builtinId("tutorial") }, { t: "span", text: "." },
+            { c: "header", children: [
+                    { text: "Home" },
                 ] },
-            { t: "h2", text: "Cards of Interest" },
-            exports.masonry({ c: "directory-highlights", rowSize: 10, layouts: directoryTileLayouts, styles: directoryTileStyles, children: highlights.map(formatTile) }),
-            { c: "directory-lists flex-row", children: [
-                    formatList("collections", collections, collectionTableState),
-                    formatList("entities", entities, entityTableState)
+            { c: "tile-scroll", children: [
+                    { c: "tiles", children: [
+                            { c: "row flex-row", children: [
+                                    { c: "tile full", children: [
+                                            { c: "tile-content-wrapper", children: [
+                                                    { c: "value text", children: [
+                                                            { text: "Welcome to Eve! Here are some of the cards currently in the system:" }
+                                                        ] }
+                                                ] }
+                                        ] },
+                                ] },
+                            { c: "row flex-row", children: [
+                                    exports.masonry({ c: "directory-highlights", rowSize: 6, layouts: directoryTileLayouts, styles: directoryTileStyles, children: highlights.map(formatTile) }),
+                                ] }
+                        ] }
                 ] }
         ] };
 }

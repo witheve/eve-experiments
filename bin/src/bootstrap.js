@@ -323,7 +323,7 @@ app.init("bootstrap", function bootstrap() {
     //   .addFact("employee", {department: "engineering", employee: "corey", salary: 11})
     //   .addFact("employee", {department: "engineering", employee: "chris", salary: 7})
     //   .addFact("employee", {department: "operations", employee: "rob", salary: 7});
-    phase.apply(true);
+    // phase.apply(true);
     window["p"] = phase;
     var _a, _b, _c;
 });

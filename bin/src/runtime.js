@@ -2166,6 +2166,16 @@ function indexer() {
     return ixer;
 }
 exports.indexer = indexer;
+function clearAllQueries(eve) {
+    var finalDiff = eve.diff();
+    for (var _i = 0, _a = eve.find("query to id"); _i < _a.length; _i++) {
+        var query = _a[_i];
+        finalDiff.merge(Query.remove(query.id, eve));
+    }
+    finalDiff.remove("query to id", {});
+    eve.applyDiff(finalDiff);
+}
+exports.clearAllQueries = clearAllQueries;
 if (utils_1.ENV === "browser")
     window["runtime"] = exports;
 //# sourceMappingURL=runtime.js.map

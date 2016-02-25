@@ -85,7 +85,6 @@ function inferRepresentation(search, baseParams) {
         params.entity = entityId || utils_1.builtinId("home");
         if (params.entity === utils_1.builtinId("home")) {
             rep = "directory";
-            params.unwrapped = true;
         }
         return { rep: rep, params: params };
     }
@@ -100,6 +99,7 @@ function inferRepresentation(search, baseParams) {
 function staticOrMappedTable(search, params) {
     var parsed = safeNLParse(search);
     var topParse = parsed[0];
+    console.log(topParse);
     params.rep = "table";
     params.search = search;
     // @NOTE: This requires the first project to be the main result of the search
@@ -119,7 +119,7 @@ function staticOrMappedTable(search, params) {
             continue;
         for (var _i = 0, _a = topParse.context[ctx]; _i < _a.length; _i++) {
             var node = _a[_i];
-            if (node.project) {
+            if (node.fxn && node.fxn.project) {
                 editable = false;
                 break;
             }
@@ -163,7 +163,7 @@ function staticOrMappedTable(search, params) {
             var node = _g[_f];
             var attr = node.attribute;
             if (attr.project) {
-                fieldMap[attr.displayName] = attr.id;
+                fieldMap[attr.projectedAs] = attr.id;
             }
         }
         if (entity && Object.keys(fieldMap).length !== 1)
@@ -304,6 +304,15 @@ app_1.handle("remove popup", function (changes, _a) {
     if (popup)
         app_1.dispatch("remove pane", { paneId: popup.pane }, changes);
     popoutHistory = [];
+});
+app_1.handle("close card", function (changes, _a) {
+    var paneId = _a.paneId;
+    if (app_1.eve.findOne("ui pane", { pane: paneId }).kind === PANE.FULL) {
+        changes.dispatch("set pane", { paneId: paneId, contains: "" });
+    }
+    else {
+        changes.dispatch("remove pane", { paneId: paneId });
+    }
 });
 app_1.handle("ui toggle search plan", function (changes, _a) {
     var paneId = _a.paneId;
@@ -591,6 +600,7 @@ function root() {
 exports.root = root;
 function hideBanner(event, elem) {
     localStorage["hideBanner"] = true;
+    app_1.dispatch("").commit();
 }
 // @TODO: Add search functionality + Pane Chrome
 var paneChrome = (_a = {},
@@ -605,13 +615,11 @@ var paneChrome = (_a = {},
             ] }
     }); },
     _a[PANE.POPOUT] = function (paneId, entityId) {
-        var parent = app_1.eve.findOne("ui pane parent", { pane: paneId })["parent"];
+        // let parent = eve.findOne("ui pane parent", {pane: paneId})["parent"];
         return {
             c: "window",
             captureClicks: true,
-            header: { t: "header", c: "", children: [
-                    { t: "button", c: "ion-android-open", click: navigateParent, link: entityId, paneId: paneId, parentId: parent, text: "" },
-                ] },
+            header: { t: "header", c: "", children: [] },
         };
     },
     _a[PANE.WINDOW] = function (paneId, entityId) { return ({
@@ -636,8 +644,9 @@ function closePrompt(event, elem) {
     }
 }
 function navigateParent(event, elem) {
+    var root = app_1.eve.findOne("ui pane", { kind: PANE.FULL })["pane"];
     app_1.dispatch("remove popup", { paneId: elem.paneId })
-        .dispatch("set pane", { paneId: elem.parentId, contains: elem.link })
+        .dispatch("set pane", { paneId: root, contains: elem.link })
         .commit();
 }
 function removePopup(event, elem) {
@@ -681,8 +690,8 @@ function deleteDatabasePrompt() {
         ] };
 }
 function nukeDatabase() {
-    localStorage.clear();
-    window.location.reload();
+    localStorage["local-eve"] = "";
+    window.location.href = window.location.origin + "/";
 }
 function savePrompt() {
     var serialized = localStorage[app_1.eveLocalStorageKey];
@@ -946,6 +955,7 @@ function getCellParams(content, rawParams) {
         var field;
         var rep;
         var aggregates = [];
+        // console.log(currentParse.query.toString())
         for (var _i = 0, _a = context_1.fxns; _i < _a.length; _i++) {
             var fxn = _a[_i];
             if (fxn.fxn.type === NLQueryParser_1.FunctionTypes.AGGREGATE) {
@@ -957,17 +967,18 @@ function getCellParams(content, rawParams) {
             var item = _c[_b];
             totalFound += context_1[item].length;
         }
+        console.log(context_1);
         if (aggregates.length === 1 && context_1["groupings"].length === 0) {
             rep = "CSV";
-            field = aggregates[0].name;
+            field = aggregates[0].fxn.projectedAs;
         }
         else if (!hasCollections && context_1.fxns.length === 1 && context_1.fxns[0].fxn.type !== NLQueryParser_1.FunctionTypes.BOOLEAN) {
             rep = "CSV";
-            field = context_1.fxns[0].name;
+            field = context_1.fxns[0].fxn.projectedAs;
         }
         else if (!hasCollections && context_1.attributes.length === 1) {
             rep = "CSV";
-            field = context_1.attributes[0].name;
+            field = context_1.attributes[0].attribute.projectedAs;
         }
         else if (context_1.entities.length + context_1.fxns.length === totalFound) {
             // if there are only entities and boolean functions then we want to show this as cards
@@ -985,6 +996,7 @@ function getCellParams(content, rawParams) {
             params["field"] = field;
         }
     }
+    console.log("PARAMS", params);
     return params;
 }
 var paneEditors = {};
@@ -1965,7 +1977,7 @@ app_1.handle("replace sourced tile", function (changes, _a) {
     if (replaceValue !== undefined && sourced.value !== replaceValue.trim()) {
         changes.remove("sourced eav", { source: source });
         if (attribute === "description") {
-            replaceValue = "\"" + replaceValue + "\"";
+            replaceValue = "\"" + replaceValue.replace(/\"/g, '\\"') + "\"";
         }
         changes.dispatch("add sourced eav", { entity: entityId, attribute: attribute, value: replaceValue, forceEntity: true });
     }
@@ -2343,7 +2355,7 @@ function searchInput(paneId, value) {
                 autoFocus: true,
                 value: name,
                 focus: focusSearch,
-                blur: setSearch,
+                // blur: setSearch,
                 cursorPosition: "end",
                 change: updateSearch,
                 shortcuts: { "Enter": setSearch }
@@ -2576,7 +2588,7 @@ var _prepare = {
         var key = paneId + "|" + params.search;
         var state = exports.uiState.widget.table[key];
         if (!state) {
-            state = exports.uiState.widget.table[key] = { sortField: undefined, sortDirection: 1, adder: {} };
+            state = exports.uiState.widget.table[key] = { sortField: undefined, sortDirection: 1, adders: [{}], changes: [] };
         }
         params["sortable"] = true;
         params["rows"] = results;
@@ -2588,7 +2600,7 @@ var _prepare = {
         var key = paneId + "|" + params.search;
         var state = exports.uiState.widget.table[key];
         if (!state) {
-            state = exports.uiState.widget.table[key] = { sortField: undefined, sortDirection: 1, adder: {} };
+            state = exports.uiState.widget.table[key] = { sortField: undefined, sortDirection: 1 };
         }
         params["rows"] = results;
         params["state"] = state;
