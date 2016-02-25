@@ -73,6 +73,9 @@ function setURL(paneId, contains, replace) {
         window.history.pushState(state, null, url);
     historyState = state;
     historyURL = url;
+    ga('send', 'pageview', {
+        'page': location.pathname + location.search + location.hash
+    });
 }
 exports.setURL = setURL;
 function inferRepresentation(search, baseParams) {
