@@ -136,8 +136,8 @@ div:hover > header > .controls, header > .controls.visible { opacity: 1; }
 .card > .table-wrapper {}
 .card .table-wrapper h2 { flex-direction:row; flex:none; padding:10px 15px; font-size: 18pt; font-weight: 900; color: rgb(106,138,156); border-bottom: 1px solid #eee; }
 .card .table-wrapper header { padding: 0 15px; padding-top:10px;}
-.card .table-wrapper .table-body-scroller { overflow:auto; }
-.card .table-wrapper .table-body { padding: 0 15px;}
+.card .table-wrapper .table-body-scroller { overflow:auto; margin-bottom:5px; }
+.card .table-wrapper .table-body { padding: 0 15px; }
 .card .table-wrapper .table-adders { flex:none; padding: 0 15px; }
 .card .table-wrapper .commit-btn { flex:none; border-top:1px solid #eee; padding:5px 15px; margin-top:5px; background: rgba(0,0,50,0.03); }
 .card .table-wrapper .commit-btn:hover { background: rgba(0,0,50,0.06); }
@@ -223,6 +223,10 @@ div:hover > header > .controls, header > .controls.visible { opacity: 1; }
 .card .property-adder input { text-align:left; padding:0; }
 
 .card .description-adder textarea { width:263px; border:none; height: 75px; font-size:12pt; outline:none; }
+
+.card .result { flex-direction: column; justify-content: center; align-items: center; }
+.card .result > .header { align-self: stretch; }
+.card .result .csv { padding: 20px 30px; font-size: 1.5em; }
 
 /*---------------------------------------------------------
 - Wiki editor
