@@ -125,7 +125,7 @@ div:hover > header > .controls, header > .controls.visible { opacity: 1; }
 
 .card {position:relative; background: white; align-self:center; align-items: stretch; min-width:200px; box-shadow: 0 7px 15px rgba(0,0,50,0.10); border-radius:5px; overflow:hidden; }
 .card .text-content { margin-right:10px; min-width:250px; white-space:pre-wrap; line-height:28px; color:#aaa; flex:none; max-height:50%; }
-.card .header { flex-direction:row; flex:none; padding:10px 15px; font-size: 18pt; font-weight: 900; color: rgb(106,138,156); border-bottom: 1px solid #eee; }
+.card .header { max-width:360px; flex-direction:row; flex:none; padding:10px 15px; font-size: 18pt; font-weight: 900; color: rgb(106,138,156); border-bottom: 1px solid #eee; }
 .card .wiki-editor { padding: 30px; padding-top:0; margin-bottom:20px; }
 .card + .card { margin-top:40px; }
 
@@ -164,7 +164,8 @@ div:hover > header > .controls, header > .controls.visible { opacity: 1; }
 
 .card .tile.active .controls { display:flex; }
 
-.card .value.text { line-height: 22px; }
+.card .value.text { line-height: 22px; display:block; }
+.card .value.text > * { display:inline; }
 
 .card .tile .multi-value { flex-direction: column; }
 .card .multi-value * + * { border-left: 0px solid #ddd; padding-left: 0px;}
@@ -177,9 +178,10 @@ div:hover > header > .controls, header > .controls.visible { opacity: 1; }
 
 .card .tile textarea { background:none; font-size:16px; border:none; width:300px; }
 
-.card .add-tile {position: absolute; padding:10px 20px; padding-right:15px; right:0; top:0; color: #ccc; cursor: default; }
+.card .control { color:#ccc; cursor:default; }
+.card .control + .control { margin-left: 15px; }
+.card .control:hover { color: #666; }
 .card .add-tile:before { transition:transform 0.2s ease-in-out; }
-.card .add-tile:hover { color: #666; }
 
 .card .tile-adder { flex:none; transition:height 0.18s ease-out;  overflow:hidden; height:0; background:#F3F8FF; flex-direction:row; flex-wrap:wrap; max-width: 360px; }
 .card .tile-adder .tile, .card .tile-adder .row { border-color: rgba(0,0,0,0.1); }
@@ -314,6 +316,8 @@ div:hover > header > .controls, header > .controls.visible { opacity: 1; }
 
 .table-wrapper .table-row > .controls, .table-wrapper .table-header > .controls { flex-grow: 1; background: #eee; opacity: 1; }
 
+.table-wrapper .table-adder { border-bottom: 1px solid transparent; }
+
 .table-wrapper { }
 .table-wrapper > .table-header {  }
 .table-wrapper .table-row + .table-row {  }
@@ -323,6 +327,7 @@ div:hover > header > .controls, header > .controls.visible { opacity: 1; }
 .table-wrapper .table-header .sort-toggle.active { opacity: 1; }
 
 .mapped-table .commit-btn { align-self: stretch; align-items: center; padding: 5px 10px; }
+.mapped-table .commit-btn.invalid { background: rgba(0, 0, 0, 0.1); color: #777; }
 
 /*---------------------------------------------------------
 - Search Input
@@ -360,14 +365,21 @@ div:hover > header > .controls, header > .controls.visible { opacity: 1; }
 /*---------------------------------------------------------
 - Directory
 ---------------------------------------------------------*/
-.directory { width: 800px; }
+.directory { width: 360px; }
 .directory h2 { padding-left: 5px; }
 .directory p { margin-left: 5px; }
 
-.directory-highlights.masonry { min-width: 600px; flex: 0 0 auto; } /* @FIXME */
-.directory-highlights.masonry .masonry-row { flex: 0 0 auto; height: 96px; }
-.directory-highlights.masonry .directory-tile { justify-content: center; align-items: center; margin: 4px; background: white; border-radius: 2px; }
-.directory-highlights .directory-tile > * { flex: 0 0 auto; }
+.directory-highlights.masonry { flex: 1 0 auto; } /* @FIXME */
+.directory-highlights.masonry .masonry-row { flex: 0 0 auto; height:96px; }
+.directory-highlights.masonry .directory-tile { margin: 0px; background: white; border-radius: 2px; }
+.directory-highlights .directory-tile > * { flex: 1 0 auto; }
+
+.directory .masonry-row + .masonry-row { border-top:1px solid #eee; }
+.directory .group + .group { border-left:1px solid #eee; }
+.directory .directory-tile + .directory-tile { border-top:1px solid #eee; }
+
+.directory .link { align-items:center; justify-content:center; }
+.directory .link:hover { border-color:transparent; background: rgba(0,0,50,0.04); }
 
 /* Background patterns from subtlepatterns.com */
 .directory-highlights.masonry .directory-tile.tile-style-1 { }

@@ -25,7 +25,7 @@ var popoutHistory = [];
 export let uiState:{
   widget: {
     search: {[paneId:string]: {value:string, plan?:boolean, focused?:boolean, submitted?:string}},
-    table: {[key:string]: {sortField:string, sortDirection:number, adder:{}}},
+    table: {[key:string]: {sortField:string, sortDirection:number, adders?:{}[], changes?: {field: string, prev: any, row:{}, value: any}[]}},
     collapsible: {[key:string]: {open:boolean}}
     attributes: any,
     card: {[key: string]: any},
@@ -87,7 +87,7 @@ function inferRepresentation(search:string|number, baseParams:{} = {}):{rep:stri
     params.entity = entityId || builtinId("home");
     if(params.entity === builtinId("home")) {
       rep = "directory";
-      params.unwrapped = true;
+      // params.unwrapped = true;
     }
     return {rep, params};
   }
@@ -104,6 +104,7 @@ function inferRepresentation(search:string|number, baseParams:{} = {}):{rep:stri
 function staticOrMappedTable(search:string, params) {
   let parsed = safeNLParse(search);
   let topParse = parsed[0];
+  console.log(topParse);
   params.rep = "table";
   params.search = search;
   // @NOTE: This requires the first project to be the main result of the search
@@ -122,7 +123,7 @@ function staticOrMappedTable(search:string, params) {
   for(let ctx in topParse.context) {
     if(ctx === "attributes" || ctx === "entities" || ctx === "collections") continue;
     for(let node of topParse.context[ctx]) {
-      if(node.project) {
+      if(node.fxn && node.fxn.project) {
         editable = false;
         break;
       }
@@ -163,7 +164,7 @@ function staticOrMappedTable(search:string, params) {
     for(let node of topParse.context.attributes) {
       let attr = node.attribute;
       if(attr.project) {
-        fieldMap[attr.displayName] = attr.id;
+        fieldMap[attr.projectedAs] = attr.id;
       }
     }
     if(entity && Object.keys(fieldMap).length !== 1) editable = false;
@@ -313,6 +314,14 @@ appHandle("remove popup", (changes:Diff, {}:{}) => {
   let popup = eve.findOne("ui pane", {kind: PANE.POPOUT});
   if(popup) dispatch("remove pane", {paneId: popup.pane}, changes);
   popoutHistory = [];
+});
+
+appHandle("close card", (changes, {paneId}) => {
+  if(eve.findOne("ui pane", {pane: paneId}).kind === PANE.FULL) {
+    changes.dispatch("set pane", {paneId, contains: ""});
+  } else {
+    changes.dispatch("remove pane", {paneId});
+  }
 });
 
 appHandle("ui toggle search plan", (changes:Diff, {paneId}:{paneId:string}) => {
@@ -571,6 +580,7 @@ export function root():Element {
 
 function hideBanner(event, elem) {
   localStorage["hideBanner"] = true;
+  dispatch("").commit();
 }
 
 // @TODO: Add search functionality + Pane Chrome
@@ -586,12 +596,14 @@ let paneChrome:{[kind:number]: (paneId:string, entityId:string) => {c?: string, 
     ]}
   }),
   [PANE.POPOUT]: (paneId, entityId) => {
-    let parent = eve.findOne("ui pane parent", {pane: paneId})["parent"];
+    // let parent = eve.findOne("ui pane parent", {pane: paneId})["parent"];
     return {
       c: "window",
       captureClicks: true,
       header: {t: "header", c: "", children: [
-        {t: "button", c: "ion-android-open", click: navigateParent, link: entityId, paneId, parentId: parent, text:""},
+        // {t: "button", c: "ion-android-search", click: navigateParent, link: entityId, paneId, text:""},
+        // {t: "button", c: "ion-ios-close-empty", click: navigateParent, link: entityId, paneId, text:""},
+        // {t: "button", c: "ion-ios-upload-outline", click: navigateParent, link: entityId, paneId, text:""},
       ]},
     };
   },
@@ -618,8 +630,9 @@ function closePrompt(event, elem) {
 }
 
 function navigateParent(event, elem) {
+  let root = eve.findOne("ui pane", {kind: PANE.FULL})["pane"];
   dispatch("remove popup", {paneId: elem.paneId})
-  .dispatch("set pane", {paneId: elem.parentId, contains: elem.link})
+  .dispatch("set pane", {paneId: root, contains: elem.link})
   .commit();
 }
 
@@ -665,8 +678,8 @@ function deleteDatabasePrompt():Element {
 }
 
 function nukeDatabase() {
-  localStorage.clear();
-  window.location.reload();
+  localStorage["local-eve"] = "";
+  window.location.href = `${window.location.origin}/`;
 }
 
 
@@ -934,6 +947,7 @@ function getCellParams(content, rawParams) {
     let field;
     let rep;
     let aggregates = [];
+    // console.log(currentParse.query.toString())
     for(let fxn of context.fxns) {
       if(fxn.fxn.type === FunctionTypes.AGGREGATE) {
         aggregates.push(fxn);
@@ -943,15 +957,16 @@ function getCellParams(content, rawParams) {
     for(let item of ["attributes", "entities", "collections", "fxns", "maybeAttributes", "maybeEntities", "maybeCollections", "maybeFunctions"]) {
       totalFound += context[item].length;
     }
+    console.log(context);
     if(aggregates.length === 1 && context["groupings"].length === 0) {
       rep = "CSV";
-      field = aggregates[0].name;
+      field = aggregates[0].fxn.projectedAs;
     } else if(!hasCollections && context.fxns.length === 1 && context.fxns[0].fxn.type !== FunctionTypes.BOOLEAN) {
       rep = "CSV";
-      field = context.fxns[0].name;
+      field = context.fxns[0].fxn.projectedAs;
     } else if(!hasCollections && context.attributes.length === 1) {
       rep = "CSV";
-      field = context.attributes[0].name;
+      field = context.attributes[0].attribute.projectedAs;
     } else if(context.entities.length + context.fxns.length === totalFound) {
       // if there are only entities and boolean functions then we want to show this as cards
       params["rep"] = "entity";
@@ -966,6 +981,7 @@ function getCellParams(content, rawParams) {
       params["field"] = field;
     }
   }
+  console.log("PARAMS", params);
   return params;
 }
 
@@ -1965,7 +1981,7 @@ appHandle("replace sourced tile", (changes, {key, attribute, entityId, source}) 
   if(replaceValue !== undefined && sourced.value !== replaceValue.trim()) {
     changes.remove("sourced eav", {source});
     if(attribute === "description") {
-      replaceValue = `"${replaceValue}"`;
+      replaceValue = `"${replaceValue.replace(/\"/g, '\\"')}"`;
     }
     changes.dispatch("add sourced eav", {entity: entityId, attribute, value: replaceValue, forceEntity: true});
   }
@@ -2341,7 +2357,7 @@ export function searchInput(paneId:string, value:string):Element {
         autoFocus: true,
         value: name,
         focus: focusSearch,
-        blur: setSearch,
+        // blur: setSearch,
         cursorPosition: "end",
         change: updateSearch,
         shortcuts: {"Enter": setSearch}
@@ -2559,7 +2575,7 @@ let _prepare:{[rep:string]: (results:{}[], params:{paneId?:string, [p:string]: a
     let key = `${paneId}|${params.search}`;
     let state =  uiState.widget.table[key];
     if(!state) {
-      state = uiState.widget.table[key] = {sortField: undefined, sortDirection: 1, adder: {}};
+      state = uiState.widget.table[key] = {sortField: undefined, sortDirection: 1, adders: [{}], changes: []};
     }
     params["sortable"] = true;
     params["rows"] = results;
@@ -2571,7 +2587,7 @@ let _prepare:{[rep:string]: (results:{}[], params:{paneId?:string, [p:string]: a
     let key = `${paneId}|${params.search}`;
     let state =  uiState.widget.table[key];
     if(!state) {
-      state = uiState.widget.table[key] = {sortField: undefined, sortDirection: 1, adder: {}};
+      state = uiState.widget.table[key] = {sortField: undefined, sortDirection: 1};
     }
     params["rows"] = results;
     params["state"] = state;
