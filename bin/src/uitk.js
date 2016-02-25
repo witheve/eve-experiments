@@ -644,7 +644,6 @@ function value(elem) {
     var value = elem.value, _a = elem.autolink, autolink = _a === void 0 ? true : _a, data = elem.data;
     elem["original"] = value;
     var entity = ui_1.asEntity(value);
-    console.log(entity);
     elem.text = value;
     if (entity) {
         elem["entity"] = entity;
@@ -678,22 +677,22 @@ function valueEditor(elem) {
             closeEditValue(event, elem);
         };
         input = { t: "input", focus: focus_1, blur: blur_1, value: "", strictText: true, placeholder: "" };
-    }
-    if (!elem.value || state.editing) {
-        input.placeholder = "<empty>";
-    }
-    if (state.editing) {
-        ["input", "change", "keyup", "keydown"].map(function (handler) {
-            if (!elem[handler])
-                return;
-            var _handle = elem[handler];
-            input[handler] = function (event, inputElem) {
-                _handle(event, elem);
-            };
-            delete elem[handler];
-        });
-        input.value = content.text;
-        content = undefined;
+        if (!elem.value || state.editing) {
+            input.placeholder = "<empty>";
+        }
+        if (state.editing) {
+            ["input", "change", "keyup", "keydown"].map(function (handler) {
+                if (!elem[handler])
+                    return;
+                var _handle = elem[handler];
+                input[handler] = function (event, inputElem) {
+                    _handle(event, elem);
+                };
+                delete elem[handler];
+            });
+            input.value = content.text;
+            content = undefined;
+        }
     }
     elem.children = [{ c: "cell-content", children: [content] }, { c: "flex-grow cell-input", children: [input] }];
     return elem;
@@ -704,6 +703,15 @@ function CSV(elem) {
     return { c: "flex-row csv", children: values.map(function (val) { return value({ t: "span", autolink: autolink, value: val, data: data }); }) };
 }
 exports.CSV = CSV;
+function result(elem) {
+    elem.c = "result";
+    elem.children = [
+        elem["search"] ? { c: "header", children: [{ text: elem["search"] }] } : undefined,
+        CSV(utils_1.copy(elem))
+    ];
+    return elem;
+}
+exports.result = result;
 function tableBody(elem) {
     var state = elem.state, rows = elem.rows, _a = elem.overrides, overrides = _a === void 0 ? [] : _a, fields = elem.fields, data = elem.data, _b = elem.groups, groups = _b === void 0 ? [] : _b;
     fields = fields.slice();
