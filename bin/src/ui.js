@@ -104,7 +104,19 @@ function staticOrMappedTable(search, params) {
     params.search = search;
     // @NOTE: This requires the first project to be the main result of the search
     params.fields = topParse.query.projects[0].fields.map(function (field) { return field.name; });
-    params.groups = topParse.context.groupings.map(function (group) { return group.name; });
+    params.groups = topParse.context.groupings.map(function (group) {
+        // @FIXME: This needs to really come off the group itself.
+        if (group.attribute)
+            return group.attribute.projectedAs;
+        if (group.entity)
+            return group.entity.projectedAs;
+        if (group.collection)
+            return group.collection.projectedAs;
+        if (group.fxn)
+            return group.fxn.projectedAs;
+        else
+            return group.name;
+    });
     //params.fields = uitk.getFields({example: results[0], blacklist: ["__id"]});
     if (!topParse || topParse.intent !== NLQueryParser_1.Intents.QUERY)
         return params;
@@ -136,7 +148,7 @@ function staticOrMappedTable(search, params) {
                     break;
                 }
                 else {
-                    subject = coll.displayName;
+                    subject = coll.projectedAs;
                 }
             }
             collections.push(coll.id);
@@ -152,7 +164,7 @@ function staticOrMappedTable(search, params) {
                     break;
                 }
                 else {
-                    subject = ent.displayName;
+                    subject = ent.projectedAs;
                     entity = ent.id;
                 }
             }
