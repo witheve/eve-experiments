@@ -681,6 +681,11 @@ function removeNode(node) {
         parent.children.sort(function (a, b) { return a.ix - b.ix; });
         parent.children.splice(parent.children.indexOf(node), 1);
         children.map(function (child) { return child.parent = parent; });
+        if (parent.hasProperty(Properties.ARGUMENT)) {
+            if (parent.children.length === 0) {
+                parent.found = false;
+            }
+        }
     }
     // Get rid of references on current node
     node.parent = undefined;
@@ -976,6 +981,9 @@ function stringToFunction(word) {
             return { name: "sum", type: FunctionTypes.AGGREGATE, fields: [{ name: "sum", types: [Properties.OUTPUT] },
                     { name: "value", types: [Properties.ATTRIBUTE] }], project: true, projectedAs: "sum" };
         case "count":
+        case "number of":
+        case "count the number of":
+        case "count number of":
         case "how many":
             return { name: "count", type: FunctionTypes.AGGREGATE, fields: [{ name: "count", types: [Properties.OUTPUT] },
                     { name: "root", types: all }], project: true, projectedAs: "count" };
@@ -1390,7 +1398,7 @@ function formTree(node, tree, context) {
                 n.hasProperty(Properties.FUNCTION); });
             for (var _g = 0; _g < AQFs.length; _g++) {
                 var aqf = AQFs[_g];
-                if (aqf.parent.hasProperty(Properties.ARGUMENT)) {
+                if (aqf.parent !== undefined && aqf.parent.hasProperty(Properties.ARGUMENT)) {
                     continue;
                 }
                 if (aqf.hasProperty(Properties.FUNCTION)) {
@@ -1788,7 +1796,7 @@ function findAttrToAttrRelationship(attrA, attrB, context) {
         attrB = temp;
     }
     // e.g. employees whose salary is 10
-    if (attrA.relationships.length > 0 && attrB.hasProperty(Properties.QUANTITY)) {
+    if (attrA.relationships.length > 0 && attrB.hasProperty(Properties.QUANTITY) && !attrA.parent.hasProperty(Properties.ARGUMENT)) {
         attrA.attribute.variable = "" + attrB.quantity;
         attrA.attribute.attributeVar = false;
         attrA.attribute.project = false;
@@ -2529,7 +2537,7 @@ function formQuery(node) {
         fields.push(entityField);
         if (entity.entityVar) {
             var valueField = {
-                name: entity.valueVar ? "link" : "value",
+                name: entity.entityVar ? "link" : "value",
                 value: entity.valueVar ? entity.value : entity.id,
                 variable: entity.valueVar,
             };

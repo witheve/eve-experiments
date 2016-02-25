@@ -1913,7 +1913,7 @@ function listTile(elem) {
         if (uitk.resolveName(current) === "entity" && attribute === "is a")
             continue;
         var source = value.source;
-        var valueElem = { c: "value", data: data, text: current };
+        var valueElem = { c: "value", data: data, value: current };
         if (rep === "externalImage") {
             valueElem.url = current;
             valueElem.text = undefined;
@@ -2039,7 +2039,7 @@ function valueTile(elem) {
     if (!content)
         content = value.eav.value;
     if (!active) {
-        ui = uitk.value({ c: "value", data: data, text: value.eav.value });
+        ui = uitk.value({ c: "value", data: data, value: value.eav.value });
     }
     else {
         ui = { t: "input", c: "value", source: source, attribute: attribute, storeAttribute: "replaceValue", cardId: cardId, entityId: entityId, value: content, postRender: uitk.autosizeAndFocus,
@@ -2641,30 +2641,37 @@ function represent(search, rep, results, params, wrapEach) {
     if (rep in _prepare) {
         var embedParamSets = _prepare[rep](results && results.results, params);
         var isArray = embedParamSets && embedParamSets.constructor === Array;
-        // try {
-        if (!embedParamSets || isArray && embedParamSets.length === 0) {
-            return uitk.error({ text: search + " as " + rep });
-        }
-        else if (embedParamSets.constructor === Array) {
-            var wrapper = { c: "flex-column", children: [] };
-            var ix = 0;
-            for (var _i = 0; _i < embedParamSets.length; _i++) {
-                var embedParams = embedParamSets[_i];
+        try {
+            if (!embedParamSets || isArray && embedParamSets.length === 0) {
+                return uitk.error({ text: search + " as " + rep });
+            }
+            else if (embedParamSets.constructor === Array) {
+                var wrapper = { c: "flex-column", children: [] };
+                var ix = 0;
+                for (var _i = 0; _i < embedParamSets.length; _i++) {
+                    var embedParams = embedParamSets[_i];
+                    embedParams["data"] = embedParams["data"] || params;
+                    if (wrapEach)
+                        wrapper.children.push(wrapEach(uitk[rep](embedParams), ix++));
+                    else
+                        wrapper.children.push(uitk[rep](embedParams));
+                }
+                return wrapper;
+            }
+            else {
+                var embedParams = embedParamSets;
                 embedParams["data"] = embedParams["data"] || params;
                 if (wrapEach)
-                    wrapper.children.push(wrapEach(uitk[rep](embedParams), ix++));
+                    return { c: "flex-column", children: [wrapEach(uitk[rep](embedParams))] };
                 else
-                    wrapper.children.push(uitk[rep](embedParams));
+                    return { c: "flex-column", children: [uitk[rep](embedParams)] };
             }
-            return wrapper;
         }
-        else {
-            var embedParams = embedParamSets;
-            embedParams["data"] = embedParams["data"] || params;
-            if (wrapEach)
-                return { c: "flex-column", children: [wrapEach(uitk[rep](embedParams))] };
-            else
-                return { c: "flex-column", children: [uitk[rep](embedParams)] };
+        catch (err) {
+            console.error("REPRESENTATION ERROR");
+            console.error({ search: search, rep: rep, results: results, params: params });
+            console.error(err);
+            return uitk.error({ text: "Failed to embed as " + (params["childRep"] || rep) });
         }
     }
     else {

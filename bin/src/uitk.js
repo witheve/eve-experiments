@@ -20,11 +20,10 @@ function resolveValue(maybeValue) {
     if (typeof maybeValue !== "string")
         return maybeValue;
     var val = maybeValue.trim();
-    if (val.indexOf("=") === 0) {
-        // @TODO: Run through the full NLP.
-        var search = val.substring(1).trim();
-        return resolveId(search);
-    }
+    var entity = ui_1.asEntity(maybeValue);
+    if (entity)
+        return entity;
+    //if(val[0] === "\"" && val[val.length - 1] === "\"") return val.slice(1, -1);
     return val;
 }
 exports.resolveValue = resolveValue;
@@ -128,10 +127,22 @@ function preventDefaultUnlessFocused(event) {
     if (event.target !== document.activeElement)
         event.preventDefault();
 }
-function closePopup() {
-    var popout = app_1.eve.findOne("ui pane", { kind: ui_1.PANE.POPOUT });
-    if (popout)
-        app_1.dispatch("remove popup", { paneId: popout.pane }).commit();
+function closePopup(event, elem, chain) {
+    var commit = false;
+    if (!chain) {
+        chain = app_1.dispatch("rerender");
+        commit = true;
+    }
+    var paneId = elem.paneId || elem.data && elem.data.paneId;
+    for (var _i = 0, _a = app_1.eve.find("ui pane parent", { parent: paneId }); _i < _a.length; _i++) {
+        var child = _a[_i].pane;
+        var popout = app_1.eve.findOne("ui pane", { pane: child, kind: ui_1.PANE.POPOUT });
+        if (!popout)
+            continue;
+        chain.dispatch("remove popup", { paneId: popout.pane });
+    }
+    if (commit)
+        chain.commit();
 }
 function navigate(event, elem) {
     var paneId = elem.data.paneId;
@@ -140,19 +151,9 @@ function navigate(event, elem) {
     else
         app_1.dispatch("set pane", { paneId: paneId, contains: elem.link }).commit();
     event.preventDefault();
+    event.stopPropagation();
 }
 exports.navigate = navigate;
-function navigateOrEdit(event, elem) {
-    var popout = app_1.eve.findOne("ui pane", { kind: ui_1.PANE.POPOUT });
-    var peeking = popout && popout.contains === elem.link;
-    if (event.target === document.activeElement) { }
-    else if (!peeking)
-        navigate(event, elem);
-    else {
-        closePopup();
-        event.target.focus();
-    }
-}
 function blurOnEnter(event, elem) {
     if (event.keyCode === utils_1.KEYS.ENTER) {
         event.target.blur();
@@ -401,7 +402,6 @@ function collectionAdderUI(elem) {
 }
 function submitCollection(adder, state, node) {
     var chain;
-    console.log("SUBMIT COLL", state.key);
     // determine whether this is making the current entity a collection, or if this is just a normal collection.
     if (!state.collectionProperty || pluralize(state.collectionProperty.trim(), 1).toLowerCase() === resolveName(state.entityId).toLowerCase()) {
         // this is turning the current entity into a collection
@@ -615,85 +615,120 @@ function results(elem) {
     return elem;
 }
 exports.results = results;
+//------------------------------------------------------------------------------
+// Representations for values
+//------------------------------------------------------------------------------
+function toggleEditValue(event, elem) {
+    if (!elem.state) {
+        console.warn("Cannot edit value without state");
+        return;
+    }
+    elem.state.editing = elem.open !== undefined ? elem.open : !elem.state.editing;
+    var chain = app_1.dispatch("rerender");
+    if (elem.state.editing) {
+        closePopup(event, elem, chain);
+    }
+    chain.commit();
+}
+function openEditValue(event, elem) {
+    elem.open = true;
+    toggleEditValue(event, elem);
+    delete elem.open;
+}
+function closeEditValue(event, elem) {
+    elem.open = false;
+    toggleEditValue(event, elem);
+    delete elem.open;
+}
 function value(elem) {
-    var _a = elem.text, val = _a === void 0 ? "" : _a, value = elem.value, _b = elem.autolink, autolink = _b === void 0 ? true : _b, _c = elem.editable, editable = _c === void 0 ? false : _c;
-    var field = "text";
-    if (editable && value) {
-        field = "value";
-        val = value;
-    }
-    elem["original"] = val;
-    var cleanup;
-    if (isEntity(val)) {
-        elem["entity"] = ui_1.asEntity(val);
-        elem[field] = resolveName(val);
-        if (autolink)
-            elem = link(elem);
-        if (editable && autolink) {
-            elem.mousedown = preventDefaultUnlessFocused;
-            elem.click = navigateOrEdit;
-            cleanup = closePopup;
+    var value = elem.value, _a = elem.autolink, autolink = _a === void 0 ? true : _a, data = elem.data;
+    elem["original"] = value;
+    var entity = ui_1.asEntity(value);
+    console.log(entity);
+    elem.text = value;
+    if (entity) {
+        elem["entity"] = entity;
+        var name_1 = resolveName(entity);
+        elem.text = name_1;
+        if (autolink) {
+            link(elem);
         }
-    }
-    if (editable) {
-        if (elem.t !== "input") {
-            elem.contentEditable = true;
-        }
-        elem.placeholder = "<empty>";
-        var _blur = elem.blur;
-        elem.blur = function (event, elem) {
-            var node = event.target;
-            if (_blur)
-                _blur(event, elem);
-            if (node.value === "= " + elem.value)
-                node.value = elem.value;
-            if (isEntity(elem.value))
-                node.classList.add("link");
-            if (cleanup)
-                cleanup(event, elem);
-        };
-        var _focus = elem.focus;
-        elem.focus = function (event, elem) {
-            var node = event.target;
-            if (elem.value !== val) {
-                node.value = "= " + elem.value;
-                node.classList.remove("link");
-            }
-            if (_focus)
-                _focus(event, elem);
-        };
     }
     return elem;
 }
 exports.value = value;
+function valueEditor(elem) {
+    elem.c = "flex-row cell " + (elem.c || "");
+    var state = elem.state, _a = elem.disabled, disabled = _a === void 0 ? false : _a, data = elem.data;
+    if (elem.original === undefined)
+        elem.original = elem.value;
+    var content = value({ value: elem.value, autolink: elem.autolink, data: data });
+    var input;
+    if (!disabled) {
+        var _focus = elem.focus;
+        var focus_1 = function (event, inputElem) {
+            if (_focus)
+                _focus(event, elem);
+            openEditValue(event, elem);
+        };
+        var _blur = elem.blur;
+        var blur_1 = function (event, inputElem) {
+            if (_blur)
+                _blur(event, elem);
+            closeEditValue(event, elem);
+        };
+        input = { t: "input", focus: focus_1, blur: blur_1, value: "", strictText: true, placeholder: "" };
+    }
+    if (!elem.value || state.editing) {
+        input.placeholder = "<empty>";
+    }
+    if (state.editing) {
+        ["input", "change", "keyup", "keydown"].map(function (handler) {
+            if (!elem[handler])
+                return;
+            var _handle = elem[handler];
+            input[handler] = function (event, inputElem) {
+                _handle(event, elem);
+            };
+            delete elem[handler];
+        });
+        input.value = content.text;
+        content = undefined;
+    }
+    elem.children = [{ c: "cell-content", children: [content] }, { c: "flex-grow cell-input", children: [input] }];
+    return elem;
+}
+exports.valueEditor = valueEditor;
 function CSV(elem) {
     var values = elem.values, _a = elem.autolink, autolink = _a === void 0 ? undefined : _a, data = elem.data;
-    return { c: "flex-row csv", children: values.map(function (val) { return value({ t: "span", autolink: autolink, text: val, data: data }); }) };
+    return { c: "flex-row csv", children: values.map(function (val) { return value({ t: "span", autolink: autolink, value: val, data: data }); }) };
 }
 exports.CSV = CSV;
 function tableBody(elem) {
-    var state = elem.state, rows = elem.rows, fields = elem.fields, data = elem.data, _a = elem.groups, groups = _a === void 0 ? [] : _a;
+    var state = elem.state, rows = elem.rows, _a = elem.overrides, overrides = _a === void 0 ? [] : _a, fields = elem.fields, data = elem.data, _b = elem.groups, groups = _b === void 0 ? [] : _b;
     fields = fields.slice();
     if (!rows.length) {
         elem.text = "<Empty Table>";
         return elem;
     }
     var disabled = {};
-    for (var _i = 0, _b = elem.disabled || []; _i < _b.length; _i++) {
-        var field_1 = _b[_i];
+    for (var _i = 0, _c = elem.disabled || []; _i < _c.length; _i++) {
+        var field_1 = _c[_i];
         disabled[field_1] = true;
     }
     // Strip grouped fields out of display fields -- the former implies the latter and must be handled first
-    for (var _c = 0; _c < groups.length; _c++) {
-        var field_2 = groups[_c];
+    for (var _d = 0; _d < groups.length; _d++) {
+        var field_2 = groups[_d];
         var fieldIx = fields.indexOf(field_2);
         if (fieldIx !== -1) {
             fields.splice(fieldIx, 1);
         }
     }
     // Manage interactivity
-    var _d = elem.sortable, sortable = _d === void 0 ? false : _d, editCell = elem.editCell, editGroup = elem.editGroup, removeRow = elem.removeRow;
+    var _e = elem.sortable, sortable = _e === void 0 ? false : _e, editCell = elem.editCell, editGroup = elem.editGroup, removeRow = elem.removeRow;
     if (editCell) {
+        if (!state.cellStates)
+            state.cellStates = [];
         var _editCell = editCell;
         editCell = function (event, elem) {
             var val = resolveValue(getNodeContent(event.target));
@@ -720,36 +755,53 @@ function tableBody(elem) {
     if (state.sortField && state.sortDirection) {
         rows.sort(sortByFieldValue(state.sortField, state.sortDirection));
     }
-    for (var _e = 0; _e < groups.length; _e++) {
-        var field = groups[_e];
+    for (var _f = 0; _f < groups.length; _f++) {
+        var field = groups[_f];
         rows.sort(sortByFieldValue(field, field === state.sortField ? state.sortDirection : 1));
     }
     elem.children = [];
     var body = elem;
     var openRows = {};
     var openVals = {};
-    for (var _f = 0; _f < rows.length; _f++) {
-        var row = rows[_f];
+    var rowIx = 0;
+    for (var _g = 0; _g < rows.length; _g++) {
+        var row = rows[_g];
+        var override = {};
+        for (var _h = 0; _h < overrides.length; _h++) {
+            var change = overrides[_h];
+            if (change.row === row) {
+                override[change.field] = change.value;
+            }
+        }
+        if (editCell && !state.cellStates[rowIx]) {
+            state.cellStates[rowIx] = {};
+        }
         var group = void 0;
-        for (var _g = 0; _g < groups.length; _g++) {
-            var field_3 = groups[_g];
-            if (openVals[field_3] === row[field_3]) {
+        for (var _j = 0; _j < groups.length; _j++) {
+            var field_3 = groups[_j];
+            var val = (field_3 in override ? override[field_3] : row[field_3]) || "";
+            if (editCell && !state.cellStates[rowIx][field_3]) {
+                state.cellStates[rowIx][field_3] = {};
+            }
+            var cellState = editCell && state.cellStates[rowIx][field_3];
+            if (openVals[field_3] === val) {
                 group = openRows[field_3];
                 group.children[0].rows.push(row);
             }
             else {
-                openVals[field_3] = row[field_3];
+                openVals[field_3] = val;
                 var cur = openRows[field_3] = {
                     c: "table-row grouped",
                     children: [
-                        value({
+                        valueEditor({
                             c: "column cell",
+                            value: val,
+                            state: cellState,
+                            data: data,
                             table: elem,
                             field: field_3,
                             rows: [row],
-                            text: row[field_3] || "",
-                            data: data,
-                            editable: !!editGroup && !disabled[field_3],
+                            disabled: !editGroup || disabled[field_3],
                             keydown: blurOnEnter,
                             blur: editGroup
                         }),
@@ -766,16 +818,22 @@ function tableBody(elem) {
             }
         }
         var rowItem = { c: "table-row", children: [] };
-        for (var _h = 0; _h < fields.length; _h++) {
-            var field_4 = fields[_h];
-            rowItem.children.push(value({
+        for (var _k = 0; _k < fields.length; _k++) {
+            var field_4 = fields[_k];
+            var val = (field_4 in override ? override[field_4] : row[field_4]) || "";
+            if (editCell && !state.cellStates[rowIx][field_4]) {
+                state.cellStates[rowIx][field_4] = {};
+            }
+            var cellState = editCell && state.cellStates[rowIx][field_4];
+            rowItem.children.push(valueEditor({
                 c: "column cell",
+                value: val,
+                state: cellState,
+                data: data,
                 table: elem,
                 field: field_4,
                 row: row,
-                text: row[field_4] || "",
-                data: data,
-                editable: !!editCell && !disabled[field_4],
+                disabled: !editCell || disabled[field_4],
                 keydown: blurOnEnter,
                 blur: editCell
             }));
@@ -789,9 +847,10 @@ function tableBody(elem) {
         else {
             body.children.push(rowItem);
         }
+        rowIx++;
     }
     elem.c = "table-body " + (elem.c || "");
-    return elem;
+    return { c: "table-body-scroller", children: [elem] };
 }
 exports.tableBody = tableBody;
 function tableHeader(elem) {
@@ -816,7 +875,7 @@ function tableHeader(elem) {
         var direction = isActive ? state.sortDirection : 0;
         var klass = "sort-toggle " + (isActive && direction < 0 ? "ion-arrow-up-b" : "ion-arrow-down-b") + " " + (isActive ? "active" : "");
         elem.children.push({ c: "column field", children: [
-                value({ c: "text", text: field, data: data, autolink: false }),
+                value({ c: "text", value: field, data: data, autolink: false }),
                 { c: "flex-grow" },
                 { c: "controls", children: [
                         sortable ? { c: klass, table: elem, field: field, direction: -direction || 1, click: sortTable } : undefined,
@@ -831,7 +890,7 @@ function tableHeader(elem) {
     return elem;
 }
 function tableAdderRow(elem) {
-    var row = elem.row, fields = elem.fields, _a = elem.confirm, confirm = _a === void 0 ? true : _a, change = elem.change, submit = elem.submit, data = elem.data;
+    var row = elem.row, cellStates = elem.cellStates, fields = elem.fields, _a = elem.confirm, confirm = _a === void 0 ? true : _a, editCell = elem.editCell, submit = elem.submit, data = elem.data;
     elem.c = "table-row table-adder " + (elem.c || "");
     elem.children = [];
     var disabled = {};
@@ -840,8 +899,8 @@ function tableAdderRow(elem) {
         disabled[field] = true;
     }
     // By default, accept all changes
-    if (!change) {
-        change = function (event, cellElem) {
+    if (!editCell) {
+        editCell = function (event, cellElem) {
             row[cellElem.field] = resolveValue(getNodeContent(event.target));
         };
     }
@@ -852,9 +911,9 @@ function tableAdderRow(elem) {
     }
     // If we should add without confirmation, submit whenever the row is completely filled in
     if (!confirm && submit) {
-        var _change = change;
-        change = function (event, cellElem) {
-            var valid = !_change(event, cellElem);
+        var _editCell = editCell;
+        editCell = function (event, cellElem) {
+            var valid = !_editCell(event, cellElem);
             for (var _i = 0; _i < fields.length; _i++) {
                 var field = fields[_i];
                 if (row[field] === undefined)
@@ -866,16 +925,20 @@ function tableAdderRow(elem) {
     }
     for (var _c = 0; _c < fields.length; _c++) {
         var field = fields[_c];
-        elem.children.push(value({
+        if (!cellStates[field]) {
+            cellStates[field] = {};
+        }
+        elem.children.push(valueEditor({
             c: "column cell " + (disabled[field] ? "disabled" : ""),
+            disabled: disabled[field],
+            value: row[field] || "",
+            state: cellStates[field],
+            data: data,
             table: elem,
             field: field,
             row: row,
-            editable: !disabled[field],
-            text: row[field] || "",
-            data: data,
             keydown: blurOnEnter,
-            blur: change
+            blur: editCell
         }));
     }
     if (confirm) {
@@ -898,8 +961,23 @@ function createFact(chain, row, _a) {
             .dispatch("create entity", { entity: entity, name: name, page: pageId });
     }
     for (var field in fieldMap) {
-        console.log(" - adding attr", fieldMap[field], "=", uitk.resolveValue(row[field]), "for", entity);
-        chain.dispatch("add sourced eav", { entity: entity, attribute: fieldMap[field], value: uitk.resolveValue(row[field]) });
+        var value_1 = resolveValue(row[field]);
+        console.log(" - adding attr", fieldMap[field], "=", value_1, "for", entity);
+        if (value_1[0] === "\"" && value_1[value_1.length - 1] === "\"") {
+            value_1 = value_1.slice(1, -1);
+        }
+        else if (typeof value_1 === "string") {
+            if (!isEntity(value_1)) {
+                var pageId = utils_1.uuid();
+                var entity_2 = utils_1.uuid();
+                var name_2 = value_1;
+                value_1 = entity_2;
+                console.log("   - creating entity", entity_2);
+                chain.dispatch("create page", { page: pageId, content: "" })
+                    .dispatch("create entity", { entity: entity_2, name: name_2, page: pageId });
+            }
+        }
+        chain.dispatch("add sourced eav", { entity: entity, attribute: fieldMap[field], value: value_1 });
     }
     if (collections) {
         for (var _i = 0; _i < collections.length; _i++) {
@@ -924,7 +1002,6 @@ function tableStateValid(tableElem) {
     }
     for (var _d = 0, _e = state.changes; _d < _e.length; _d++) {
         var change = _e[_d];
-        console.log(change, change.value);
         if (change.value === undefined || change.value === "")
             return false;
     }
@@ -973,9 +1050,9 @@ function changeEntityAdder(event, elem) {
         var entityId = ui_1.asEntity(resolveValue(row[subject]));
         if (entityId) {
             for (var field_6 in fieldMap) {
-                var _a = (app_1.eve.findOne("entity eavs", { entity: entityId, attribute: fieldMap[field_6] }) || {}).value, value_1 = _a === void 0 ? undefined : _a;
-                if (!row[field_6] && value_1 !== undefined) {
-                    row[field_6] = value_1;
+                var _a = (app_1.eve.findOne("entity eavs", { entity: entityId, attribute: fieldMap[field_6] }) || {}).value, value_2 = _a === void 0 ? undefined : _a;
+                if (!row[field_6] && value_2 !== undefined) {
+                    row[field_6] = value_2;
                 }
             }
         }
@@ -990,7 +1067,7 @@ function updateRowAttribute(event, elem) {
     var change;
     for (var _i = 0, _a = state.changes; _i < _a.length; _i++) {
         var cur = _a[_i];
-        if (cur.field === field && cur.prev === row[field] && cur.row === row) {
+        if (cur.field === field && cur.row === row) {
             change = cur;
             break;
         }
@@ -1002,7 +1079,6 @@ function updateRowAttribute(event, elem) {
     else {
         change.value = value;
     }
-    console.log(state);
     app_1.dispatch("rerender").commit();
 }
 function commitChanges(event, elem) {
@@ -1020,9 +1096,9 @@ function commitChanges(event, elem) {
             createFact(chain, adder, tableElem);
         }
         for (var _a = 0, _b = state.changes; _a < _b.length; _a++) {
-            var _c = _b[_a], field = _c.field, prev = _c.prev, row = _c.row, value_2 = _c.value;
-            var entity_2 = row[subject];
-            app_1.dispatch("update entity attribute", { entity: entity_2, attribute: fieldMap[field], prev: prev, value: value_2 }).commit();
+            var _c = _b[_a], field = _c.field, prev = _c.prev, row = _c.row, value_3 = _c.value;
+            var entity_3 = row[subject];
+            app_1.dispatch("update entity attribute", { entity: entity_3, attribute: fieldMap[field], prev: prev, value: value_3 }).commit();
         }
         state.adders = [{}];
         state.changes = [];
@@ -1036,6 +1112,7 @@ function table(elem) {
     var state = elem.state, rows = elem.rows, fields = elem.fields, groups = elem.groups, disabled = elem.disabled, sortable = elem.sortable, editCell = elem.editCell, data = elem.data;
     elem.c = "table-wrapper table " + (elem.c || "");
     elem.children = [
+        elem.search ? { t: "h2", text: elem.search } : undefined,
         tableHeader({ state: state, fields: fields, groups: groups, sortable: sortable, data: data }),
         tableBody({ rows: rows, state: state, fields: fields, groups: groups, disabled: disabled, sortable: sortable, editCell: editCell, data: data })
     ];
@@ -1051,24 +1128,40 @@ function mappedTable(elem) {
             adder[subject] = entity;
         }
     }
+    if (!state.adderCellStates) {
+        state.adderCellStates = [];
+    }
+    if (state.adders.length !== state.adderCellStates.length) {
+        if (state.adders.length > state.adderCellStates.length) {
+            for (var ix = 0; ix = state.adders.length - state.adderCellStates.length; ix++) {
+                state.adderCellStates.push({});
+            }
+        }
+        else {
+            state.adderCellStates.splice(state.adders.length, state.adderCellStates.length);
+        }
+    }
     var rows = elem.rows, fields = elem.fields, groups = elem.groups, _b = elem.disabled, disabled = _b === void 0 ? [subject] : _b, _c = elem.sortable, sortable = _c === void 0 ? true : _c;
     var adderChanged = entity ? changeAttributeAdder : changeEntityAdder;
     var adderDisabled = entity ? [subject] : undefined;
     var stateValid = tableStateValid(elem);
     elem.c = "table-wrapper mapped-table " + (elem.c || "");
     elem.children = [
+        elem.search ? { t: "h2", text: elem.search } : undefined,
         tableHeader({ state: state, fields: fields, groups: groups, sortable: sortable, data: data }),
-        tableBody({ rows: rows, state: state, fields: fields, groups: groups, disabled: disabled, sortable: sortable, subject: subject, fieldMap: fieldMap, editCell: updateRowAttribute, data: data }),
-        { c: "table-adders", children: state.adders.map(function (row) { return tableAdderRow({
+        tableBody({ rows: rows, overrides: state.changes, state: state, fields: fields, groups: groups, disabled: disabled, sortable: sortable, subject: subject, fieldMap: fieldMap, editCell: updateRowAttribute, data: data }),
+        { c: "table-adders", children: state.adders.map(function (row, ix) { return tableAdderRow({
                 row: row,
                 state: state,
+                cellStates: state.adderCellStates[ix],
                 fields: fields,
                 disabled: adderDisabled,
                 confirm: false,
                 subject: subject,
                 fieldMap: fieldMap,
                 collections: collections,
-                change: adderChanged
+                data: data,
+                editCell: adderChanged
             }); }) },
         { c: "ion-checkmark-round commit-btn " + (stateValid ? "valid" : "invalid"), table: elem, click: stateValid && commitChanges }
     ];
