@@ -1916,7 +1916,7 @@ export function listTile(elem) {
     let current = reverseEntityAndValue ? value.eav.entity : value.eav.value;
     if(uitk.resolveName(current) === "entity" && attribute === "is a") continue;
     let source = value.source;
-    let valueElem:any = {c: "value", data, text: current};
+    let valueElem:any = {c: "value", data, value: current};
     if(rep === "externalImage") {
       valueElem.url = current;
       valueElem.text = undefined;
@@ -2044,7 +2044,7 @@ function valueTile(elem) {
   let content = uitk.resolveName(value.eav.value);
   if(!content) content = value.eav.value;
   if(!active) {
-    ui = uitk.value({c: "value", data, text: value.eav.value});
+    ui = uitk.value({c: "value", data, value: value.eav.value});
   } else {
     ui = {t: "input", c: "value", source, attribute, storeAttribute: "replaceValue", cardId, entityId, value: content, postRender: uitk.autosizeAndFocus,
     input: autosizeAndStoreInput, keydown: handleTileKeys};
@@ -2626,7 +2626,7 @@ function represent(search: string, rep:string, results, params:{}, wrapEach?:(el
   if(rep in _prepare) {
     let embedParamSets = _prepare[rep](results && results.results, <any>params);
     let isArray = embedParamSets && embedParamSets.constructor === Array;
-    // try {
+    try {
       if(!embedParamSets || isArray && embedParamSets.length === 0) {
         return uitk.error({text: `${search} as ${rep}`})
       } else if(embedParamSets.constructor === Array) {
@@ -2644,12 +2644,12 @@ function represent(search: string, rep:string, results, params:{}, wrapEach?:(el
         if(wrapEach) return {c: "flex-column", children: [wrapEach(uitk[rep](embedParams))]};
         else return {c: "flex-column", children: [uitk[rep](embedParams)]};
       }
-    // } catch(err) {
-    //   console.error("REPRESENTATION ERROR");
-    //   console.error({search, rep, results, params});
-    //   console.error(err);
-    //   return uitk.error({text: `Failed to embed as ${params["childRep"] || rep}`})
-    // }
+    } catch(err) {
+      console.error("REPRESENTATION ERROR");
+      console.error({search, rep, results, params});
+      console.error(err);
+      return uitk.error({text: `Failed to embed as ${params["childRep"] || rep}`})
+    }
   } else {
     console.error("REPRESENTATION ERROR");
     console.error({search, rep, results, params});
