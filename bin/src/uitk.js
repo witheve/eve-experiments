@@ -1116,6 +1116,15 @@ function commitChanges(event, elem) {
         console.warn("One or more changes is invalid, so all changes have not been committed");
     }
 }
+function commitChangesOnEnter(event, elem) {
+    if (event.keyCode === utils_1.KEYS.ENTER) {
+        var target = event.target;
+        if (target && target.blur) {
+            target.blur();
+        }
+        commitChanges(event, { table: elem });
+    }
+}
 function table(elem) {
     var state = elem.state, rows = elem.rows, fields = elem.fields, groups = elem.groups, disabled = elem.disabled, sortable = elem.sortable, editCell = elem.editCell, data = elem.data;
     elem.c = "table-wrapper table " + (elem.c || "");
@@ -1154,6 +1163,7 @@ function mappedTable(elem) {
     var adderDisabled = entity ? [subject] : undefined;
     var stateValid = tableStateValid(elem);
     elem.c = "table-wrapper mapped-table " + (elem.c || "");
+    elem.keydown = commitChangesOnEnter;
     elem.children = [
         elem.search ? { t: "h2", text: elem.search } : undefined,
         tableHeader({ state: state, fields: fields, groups: groups, sortable: sortable, data: data }),

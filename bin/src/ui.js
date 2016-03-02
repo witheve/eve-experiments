@@ -1929,19 +1929,19 @@ function listTile(elem) {
         if (uitk.resolveName(current) === "entity" && attribute === "is a")
             continue;
         var source = value.source;
-        var valueElem = { c: "value", data: data, value: current };
+        var valueElem = { c: "value", data: data, value: current, autolink: !active };
         if (rep === "externalImage") {
             valueElem.url = current;
             valueElem.text = undefined;
         }
-        var ui = uitk[rep](valueElem);
+        var ui = { c: "value-wrapper", data: data, children: [uitk[rep](valueElem)] };
         if (active) {
             ui["cardId"] = cardId;
             ui["storeAttribute"] = "itemsToRemove";
             ui["storeId"] = source;
             ui.click = toggleListTileItem;
             if (state.activeTile.itemsToRemove && state.activeTile.itemsToRemove[source]) {
-                ui.c += " marked-to-remove";
+                ui.c = (ui.c || "") + " marked-to-remove";
             }
         }
         listChildren.push(ui);
@@ -2363,7 +2363,7 @@ function searchInput(paneId, value) {
                     // {c: `ion-ios-arrow-${state.plan ? 'up' : 'down'} plan`, click: toggleSearchPlan, paneId},
                     // while technically a button, we don't need to do anything as clicking it will blur the editor
                     // which will execute the search
-                    { c: "ion-android-search visible", paneId: paneId }
+                    { c: "ion-android-search visible", paneId: paneId, click: focusOrSetSearch }
                 ] },
             codeMirrorElement({
                 c: "flex-grow wiki-search-input " + (state.focused ? "selected" : ""),
@@ -2399,6 +2399,23 @@ function setSearch(event, elem) {
                 .dispatch("set pane", { paneId: elem.paneId, contains: value })
                 .commit();
         }
+    }
+}
+function focusOrSetSearch(event, elem) {
+    var target = document.querySelector(".wiki-search-input");
+    var cm = target["cm"];
+    var state = exports.uiState.widget.search[elem.paneId] || { value: "" };
+    var rawVal = cm.getDoc().getValue();
+    var value = rawVal !== undefined ? rawVal : state.value;
+    var pane = app_1.eve.findOne("ui pane", { pane: elem.paneId });
+    if (!pane || pane.contains !== (asEntity(value) || value)) {
+        var _a = dispatchSearchSetAttributes(value), chain = _a.chain, isSetSearch = _a.isSetSearch;
+        chain.dispatch("insert query", { query: value })
+            .dispatch("set pane", { paneId: elem.paneId, contains: value })
+            .commit();
+    }
+    else {
+        cm.focus();
     }
 }
 function updateSearch(event, elem) {
