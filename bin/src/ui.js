@@ -2612,8 +2612,8 @@ var _prepare = {
                 var field = fields[_a];
                 var entityId = result[field];
                 var paneId = params["paneId"];
-                var editor = prepareCardEditor(entityId, paneId);
-                entities.push({ entity: result[field], data: params, editor: editor });
+                // var editor = prepareCardEditor(entityId, paneId);
+                entities.push({ entity: result[field], data: params, editor: {} });
             }
         }
         return entities;
