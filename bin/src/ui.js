@@ -73,6 +73,9 @@ function setURL(paneId, contains, replace) {
         window.history.pushState(state, null, url);
     historyState = state;
     historyURL = url;
+    ga('send', 'pageview', {
+        'page': location.pathname + location.search + location.hash
+    });
 }
 exports.setURL = setURL;
 function inferRepresentation(search, baseParams) {
@@ -104,7 +107,19 @@ function staticOrMappedTable(search, params) {
     params.search = search;
     // @NOTE: This requires the first project to be the main result of the search
     params.fields = topParse.query.projects[0].fields.map(function (field) { return field.name; });
-    params.groups = topParse.context.groupings.map(function (group) { return group.name; });
+    params.groups = topParse.context.groupings.map(function (group) {
+        // @FIXME: This needs to really come off the group itself.
+        if (group.attribute)
+            return group.attribute.projectedAs;
+        if (group.entity)
+            return group.entity.projectedAs;
+        if (group.collection)
+            return group.collection.projectedAs;
+        if (group.fxn)
+            return group.fxn.projectedAs;
+        else
+            return group.name;
+    });
     //params.fields = uitk.getFields({example: results[0], blacklist: ["__id"]});
     if (!topParse || topParse.intent !== NLQueryParser_1.Intents.QUERY)
         return params;
@@ -136,7 +151,7 @@ function staticOrMappedTable(search, params) {
                     break;
                 }
                 else {
-                    subject = coll.displayName;
+                    subject = coll.projectedAs;
                 }
             }
             collections.push(coll.id);
@@ -152,7 +167,7 @@ function staticOrMappedTable(search, params) {
                     break;
                 }
                 else {
-                    subject = ent.displayName;
+                    subject = ent.projectedAs;
                     entity = ent.id;
                 }
             }
@@ -750,6 +765,7 @@ function pane(paneId) {
     else if (app_1.eve.findOne("query to id", { query: contains.trim().toLowerCase() }))
         contentType = "search";
     if (params.rep || rep) {
+        params["search"] = contains;
         content = represent(contains, params.rep || rep, results, params, (params.unwrapped ? undefined : function (elem, ix) { return uitk.card({ id: paneId + "|" + contains + "|" + (ix === undefined ? "" : ix), children: [elem] }); }));
         content.t = "content";
         content.c = (content.c || "") + " " + (params.unwrapped ? "unwrapped" : "");
@@ -969,15 +985,15 @@ function getCellParams(content, rawParams) {
         }
         console.log(context_1);
         if (aggregates.length === 1 && context_1["groupings"].length === 0) {
-            rep = "CSV";
+            rep = "result";
             field = aggregates[0].fxn.projectedAs;
         }
         else if (!hasCollections && context_1.fxns.length === 1 && context_1.fxns[0].fxn.type !== NLQueryParser_1.FunctionTypes.BOOLEAN) {
-            rep = "CSV";
+            rep = "result";
             field = context_1.fxns[0].fxn.projectedAs;
         }
         else if (!hasCollections && context_1.attributes.length === 1) {
-            rep = "CSV";
+            rep = "result";
             field = context_1.attributes[0].attribute.projectedAs;
         }
         else if (context_1.entities.length + context_1.fxns.length === totalFound) {
@@ -1913,19 +1929,19 @@ function listTile(elem) {
         if (uitk.resolveName(current) === "entity" && attribute === "is a")
             continue;
         var source = value.source;
-        var valueElem = { c: "value", data: data, value: current };
+        var valueElem = { c: "value", data: data, value: current, autolink: !active };
         if (rep === "externalImage") {
             valueElem.url = current;
             valueElem.text = undefined;
         }
-        var ui = uitk[rep](valueElem);
+        var ui = { c: "value-wrapper", data: data, children: [uitk[rep](valueElem)] };
         if (active) {
             ui["cardId"] = cardId;
             ui["storeAttribute"] = "itemsToRemove";
             ui["storeId"] = source;
             ui.click = toggleListTileItem;
             if (state.activeTile.itemsToRemove && state.activeTile.itemsToRemove[source]) {
-                ui.c += " marked-to-remove";
+                ui.c = (ui.c || "") + " marked-to-remove";
             }
         }
         listChildren.push(ui);
@@ -2347,7 +2363,7 @@ function searchInput(paneId, value) {
                     // {c: `ion-ios-arrow-${state.plan ? 'up' : 'down'} plan`, click: toggleSearchPlan, paneId},
                     // while technically a button, we don't need to do anything as clicking it will blur the editor
                     // which will execute the search
-                    { c: "ion-android-search visible", paneId: paneId }
+                    { c: "ion-android-search visible", paneId: paneId, click: focusOrSetSearch }
                 ] },
             codeMirrorElement({
                 c: "flex-grow wiki-search-input " + (state.focused ? "selected" : ""),
@@ -2383,6 +2399,23 @@ function setSearch(event, elem) {
                 .dispatch("set pane", { paneId: elem.paneId, contains: value })
                 .commit();
         }
+    }
+}
+function focusOrSetSearch(event, elem) {
+    var target = document.querySelector(".wiki-search-input");
+    var cm = target["cm"];
+    var state = exports.uiState.widget.search[elem.paneId] || { value: "" };
+    var rawVal = cm.getDoc().getValue();
+    var value = rawVal !== undefined ? rawVal : state.value;
+    var pane = app_1.eve.findOne("ui pane", { pane: elem.paneId });
+    if (!pane || pane.contains !== (asEntity(value) || value)) {
+        var _a = dispatchSearchSetAttributes(value), chain = _a.chain, isSetSearch = _a.isSetSearch;
+        chain.dispatch("insert query", { query: value })
+            .dispatch("set pane", { paneId: elem.paneId, contains: value })
+            .commit();
+    }
+    else {
+        cm.focus();
     }
 }
 function updateSearch(event, elem) {
@@ -2561,6 +2594,11 @@ var _prepare = {
             values.push(row_2[field]);
         }
         return { values: values, data: params.data };
+    },
+    result: function (results, params) {
+        var elem = _prepare["CSV"](results, params);
+        elem.search = params["search"];
+        return elem;
     },
     entity: function (results, params) {
         var entities = [];

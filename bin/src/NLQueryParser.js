@@ -55,9 +55,9 @@ function parse(queryString, lastParse) {
     context.entities = context.found.filter(function (n) { return n.hasProperty(Properties.ENTITY) && !n.hasProperty(Properties.SUBSUMED) && !n.hasProperty(Properties.IMPLICIT); });
     context.collections = context.found.filter(function (n) { return n.hasProperty(Properties.COLLECTION) && !n.hasProperty(Properties.SUBSUMED) && !n.hasProperty(Properties.IMPLICIT); });
     context.attributes = context.found.filter(function (n) { return n.hasProperty(Properties.ATTRIBUTE) && !n.hasProperty(Properties.SUBSUMED) && !n.hasProperty(Properties.IMPLICIT); });
-    context.maybeAttributes = context.maybeAttributes.filter(function (n) { return !n.hasProperty(Properties.SUBSUMED); });
-    context.maybeCollections = context.maybeCollections.filter(function (n) { return !n.hasProperty(Properties.SUBSUMED); });
-    context.maybeEntities = context.maybeEntities.filter(function (n) { return !n.hasProperty(Properties.SUBSUMED); });
+    context.maybeAttributes = context.maybeAttributes.filter(function (n) { return !n.hasProperty(Properties.SUBSUMED) && !n.found; });
+    context.maybeCollections = context.maybeCollections.filter(function (n) { return !n.hasProperty(Properties.SUBSUMED) && !n.found; });
+    context.maybeEntities = context.maybeEntities.filter(function (n) { return !n.hasProperty(Properties.SUBSUMED) && !n.found; });
     // Manage results
     var intent = Intents.NORESULT;
     var query = newQuery();
@@ -1450,7 +1450,7 @@ function formTree(node, tree, context) {
                     break;
                 }
                 else if (relationship.type === RelationshipTypes.NONE) {
-                    if (foundNode.hasProperty(Properties.POSSESSIVE) && !node.hasProperty(Properties.QUANTITY)) {
+                    if (foundNode.hasProperty(Properties.POSSESSIVE) && !node.found && !node.hasProperty(Properties.QUANTITY)) {
                         context.maybeAttributes.push(node);
                     }
                 }
@@ -1886,13 +1886,16 @@ function findCollToEntRelationship(coll, ent, context) {
 function findEntToAttrRelationship(ent, attr, context) {
     log("Finding Ent -> Attr relationship between \"" + ent.name + "\" and \"" + attr.name + "\"...");
     // If the node already has a relationship, then treat the entity as filtering the node
-    if (attr.relationships.length > 0) {
+    if (attr.relationships.length > 0 && !attr.parent.hasProperty(Properties.ARGUMENT)) {
         attr.attribute.variable = ent.entity.id;
         attr.attribute.attributeVar = false;
         attr.attribute.project = false;
         ent.entity.project = false;
         ent.entity.handled = true;
         return { type: RelationshipTypes.DIRECT, nodes: [ent, attr] };
+    }
+    else if (attr.relationships.length > 0) {
+        return { type: RelationshipTypes.NONE };
     }
     // Check for a direct relationship
     // e.g. "Josh's age"
@@ -2385,7 +2388,8 @@ function formQuery(node) {
                 }
                 return { name: node.fxn.fields[i].name,
                     value: arg.attribute.variable,
-                    variable: true };
+                    variable: arg.attribute.attributeVar !== undefined ? arg.attribute.attributeVar : true
+                };
             }).filter(function (f) { return f !== undefined; });
             var term = {
                 type: "select",

@@ -644,7 +644,6 @@ function value(elem) {
     var value = elem.value, _a = elem.autolink, autolink = _a === void 0 ? true : _a, data = elem.data;
     elem["original"] = value;
     var entity = ui_1.asEntity(value);
-    console.log(entity);
     elem.text = value;
     if (entity) {
         elem["entity"] = entity;
@@ -678,22 +677,22 @@ function valueEditor(elem) {
             closeEditValue(event, elem);
         };
         input = { t: "input", focus: focus_1, blur: blur_1, value: "", strictText: true, placeholder: "" };
-    }
-    if (!elem.value || state.editing) {
-        input.placeholder = "<empty>";
-    }
-    if (state.editing) {
-        ["input", "change", "keyup", "keydown"].map(function (handler) {
-            if (!elem[handler])
-                return;
-            var _handle = elem[handler];
-            input[handler] = function (event, inputElem) {
-                _handle(event, elem);
-            };
-            delete elem[handler];
-        });
-        input.value = content.text;
-        content = undefined;
+        if (!elem.value || state.editing) {
+            input.placeholder = "<empty>";
+        }
+        if (state.editing) {
+            ["input", "change", "keyup", "keydown"].map(function (handler) {
+                if (!elem[handler])
+                    return;
+                var _handle = elem[handler];
+                input[handler] = function (event, inputElem) {
+                    _handle(event, elem);
+                };
+                delete elem[handler];
+            });
+            input.value = content.text;
+            content = undefined;
+        }
     }
     elem.children = [{ c: "cell-content", children: [content] }, { c: "flex-grow cell-input", children: [input] }];
     return elem;
@@ -704,6 +703,15 @@ function CSV(elem) {
     return { c: "flex-row csv", children: values.map(function (val) { return value({ t: "span", autolink: autolink, value: val, data: data }); }) };
 }
 exports.CSV = CSV;
+function result(elem) {
+    elem.c = "result";
+    elem.children = [
+        elem["search"] ? { c: "header", children: [{ text: elem["search"] }] } : undefined,
+        CSV(utils_1.copy(elem))
+    ];
+    return elem;
+}
+exports.result = result;
 function tableBody(elem) {
     var state = elem.state, rows = elem.rows, _a = elem.overrides, overrides = _a === void 0 ? [] : _a, fields = elem.fields, data = elem.data, _b = elem.groups, groups = _b === void 0 ? [] : _b;
     fields = fields.slice();
@@ -1108,6 +1116,15 @@ function commitChanges(event, elem) {
         console.warn("One or more changes is invalid, so all changes have not been committed");
     }
 }
+function commitChangesOnEnter(event, elem) {
+    if (event.keyCode === utils_1.KEYS.ENTER) {
+        var target = event.target;
+        if (target && target.blur) {
+            target.blur();
+        }
+        commitChanges(event, { table: elem });
+    }
+}
 function table(elem) {
     var state = elem.state, rows = elem.rows, fields = elem.fields, groups = elem.groups, disabled = elem.disabled, sortable = elem.sortable, editCell = elem.editCell, data = elem.data;
     elem.c = "table-wrapper table " + (elem.c || "");
@@ -1146,6 +1163,7 @@ function mappedTable(elem) {
     var adderDisabled = entity ? [subject] : undefined;
     var stateValid = tableStateValid(elem);
     elem.c = "table-wrapper mapped-table " + (elem.c || "");
+    elem.keydown = commitChangesOnEnter;
     elem.children = [
         elem.search ? { t: "h2", text: elem.search } : undefined,
         tableHeader({ state: state, fields: fields, groups: groups, sortable: sortable, data: data }),

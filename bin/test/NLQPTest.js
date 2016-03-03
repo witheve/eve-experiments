@@ -7,7 +7,7 @@ var app_1 = require("../src/app");
 // optimizing away unused code
 var boostrapIxer = bootstrap.ixer;
 app.renderRoots["nlqp"];
-nlqp.debug = true;
+nlqp.debug = false;
 function parseTest(queryString, n) {
     var parseResult;
     var avgTime = 0;
@@ -125,17 +125,89 @@ var phrases = [
     // These are queries that we had problems with in the past
     // make sure they always work
     // -------------------------------// 
-    //"ganymede discovered by",
     //"employees, salaries per department",
     /*
     "Corey's salary, department, and age",
     "Corey's wife's age, gender, and height",
     */
-    //"moons discovered by sir william herschel",
     // -------------------------------
-    //"moons of jupiter", //X
-    //"jupiter's moons", //X
+    "moons year discovered after ariel year discovered",
+    "moons of jupiter",
+    "moons discovered by sir william herschel",
+    "jupiter's moons",
+    "moons per planet",
+    "planets per moon",
+    "number of moons per planet",
+    "count the number of moons per planet",
     "moons whose year discovered is 1610",
+    "ganymede was discovered by",
+    "planets with their moons",
+    "ganymede discovered by",
+    "moons discovered by galileo galilei",
+    "moons discovered by sir william herschel",
+    "planets discovered by galileo galilei",
+    "planets discovered by sir william herschel",
+    "celestial bodies discovered by Galileo Galilei",
+    //"salary's sum * "
+    //"composer compositions",
+    //"composer composition",
+    //"Corey's department is engineering",
+    "corey's salary",
+    //"josh's salary * corey montella's age"
+    //"Chris' salary and department"
+    //"Employee's union"
+    "pets lengths",
+    "employee departments",
+    //"Corey's salary, department, and age",
+    "3 - Corey's salary",
+    "1+1",
+    "employees with their departments",
+    "employees with their departments and salaries",
+    "employee salary and employee department",
+    "employee salary and department",
+    'test data that is an employee',
+    "salaries per employee per department",
+    "salaries per department per employee",
+    "employees which are test data",
+    "sum of salaries in engineering",
+    "sum of salaries in the engineering department",
+    "salaries in engineering",
+    'exotics that are test data',
+    'test data that are employees',
+    "Pets that not length",
+    "pets that do not have a length",
+    "Pets except those longer than a koala",
+    "Pet not longer than koalas",
+    "exotic that are not pets",
+    "pets not exotics",
+    "Pets that are exotic with length <= 3",
+    "Pets that are exotic with length != 4",
+    //"Corey's salary + 3",
+    "exotic lengths",
+    "sum lengths of pets that are exotic",
+    "pets that are exotic that have length",
+    "exotic pets",
+    "sum of employee salaries",
+    "salaries per department",
+    "employee salaries",
+    "sum employee salaries",
+    "exotic lengths",
+    "salaries by department",
+    "employee salaries",
+    "employees with their salaries",
+    "employees with their departments",
+    "employees and their salaries",
+    "sum salaries",
+    "Pet shorter than koala",
+    "sum salaries per department",
+    "sum salary per department",
+    "pets lengths",
+    "department salaries",
+    "corey's salary",
+    "lengths",
+    "sum lengths",
+    "sum pet lengths",
+    "sum pet length",
 ];
 /*
 let siriphrases = [
