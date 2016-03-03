@@ -10,8 +10,9 @@ import * as uitk from "./uitk";
 import {navigate, preventDefault} from "./uitk";
 import {eve, eveLocalStorageKey, handle as appHandle, dispatch, activeSearches, renderer} from "./app";
 import {parseDSL} from "./parser";
-import {parse as nlparse, normalizeString, Intents, FunctionTypes, NodeTypes} from "./NLQueryParser";
+import {parse as nlparse, normalizeString, Intents, FunctionTypes, NodeTypes, Result as NLResult} from "./NLQueryParser";
 
+declare var ga;
 
 export enum PANE { FULL, WINDOW, POPOUT };
 enum BLOCK { TEXT, PROJECTION };
@@ -76,6 +77,9 @@ export function setURL(paneId:string, contains:string, replace?:boolean) {
 
   historyState = state;
   historyURL = url;
+  ga('send', 'pageview', {
+    'page': location.pathname + location.search  + location.hash
+  });
 }
 
 function inferRepresentation(search:string|number, baseParams:{} = {}):{rep:string, params:{}} {
@@ -109,7 +113,14 @@ function staticOrMappedTable(search:string, params) {
   params.search = search;
   // @NOTE: This requires the first project to be the main result of the search
   params.fields = topParse.query.projects[0].fields.map((field) => field.name);
-  params.groups = topParse.context.groupings.map((group) => group.name);
+  params.groups = topParse.context.groupings.map((group) => {
+    // @FIXME: This needs to really come off the group itself.
+    if(group.attribute) return group.attribute.projectedAs;
+    if(group.entity) return group.entity.projectedAs;
+    if(group.collection) return group.collection.projectedAs;
+    if(group.fxn) return group.fxn.projectedAs;
+    else return group.name;
+  });
   //params.fields = uitk.getFields({example: results[0], blacklist: ["__id"]});
 
   if(!topParse || topParse.intent !== Intents.QUERY) return params;
@@ -139,7 +150,7 @@ function staticOrMappedTable(search:string, params) {
           editable = false;
           break;
         } else {
-          subject = coll.displayName;
+          subject = coll.projectedAs;
         }
       }
       collections.push(coll.id);
@@ -153,7 +164,7 @@ function staticOrMappedTable(search:string, params) {
           editable = false;
           break;
         } else {
-          subject = ent.displayName;
+          subject = ent.projectedAs;
           entity = ent.id;
         }
       }
@@ -183,13 +194,13 @@ function staticOrMappedTable(search:string, params) {
   return params;
 }
 
-function safeNLParse(query):any[] {
+function safeNLParse(query):NLResult[] {
   try {
     return nlparse(query);
   } catch(e) {
     console.error("NLParse error");
     console.error(e);
-    return [{intent: Intents.NORESULT, context: {}, query: {}, projects: {}}];
+    return [<NLResult><any>{intent: Intents.NORESULT, context: {}, query: {}, projects: {}}];
   }
 }
 
@@ -1917,19 +1928,19 @@ export function listTile(elem) {
     let current = reverseEntityAndValue ? value.eav.entity : value.eav.value;
     if(uitk.resolveName(current) === "entity" && attribute === "is a") continue;
     let source = value.source;
-    let valueElem:any = {c: "value", data, value: current};
+    let valueElem:any = {c: "value", data, value: current, autolink: !active};
     if(rep === "externalImage") {
       valueElem.url = current;
       valueElem.text = undefined;
     }
-    let ui = uitk[rep](valueElem);
+    let ui:Element = {c: "value-wrapper", data, children: [uitk[rep](valueElem)]};
     if(active) {
       ui["cardId"] = cardId;
       ui["storeAttribute"] = "itemsToRemove";
       ui["storeId"] = source;
       ui.click = toggleListTileItem;
       if(state.activeTile.itemsToRemove && state.activeTile.itemsToRemove[source]) {
-        ui.c += " marked-to-remove";
+        ui.c = `${ui.c || ""} marked-to-remove`;
       }
     }
     listChildren.push(ui);
@@ -2350,7 +2361,7 @@ export function searchInput(paneId:string, value:string):Element {
         // {c: `ion-ios-arrow-${state.plan ? 'up' : 'down'} plan`, click: toggleSearchPlan, paneId},
         // while technically a button, we don't need to do anything as clicking it will blur the editor
         // which will execute the search
-        {c: "ion-android-search visible", paneId}
+        {c: "ion-android-search visible", paneId, click: focusOrSetSearch}
       ]},
       codeMirrorElement({
         c: `flex-grow wiki-search-input ${state.focused ? "selected": ""}`,
@@ -2386,6 +2397,25 @@ function setSearch(event, elem) {
     }
   }
 }
+
+function focusOrSetSearch(event, elem) {
+  let target = <HTMLElement>document.querySelector(".wiki-search-input");
+  let cm:CodeMirror.Editor = target["cm"];
+  let state:any = uiState.widget.search[elem.paneId] || {value: ""};
+  let rawVal = cm.getDoc().getValue();
+  let value = rawVal !== undefined ? rawVal : state.value;
+  let pane = eve.findOne("ui pane", {pane: elem.paneId});
+
+  if(!pane || pane.contains !== (asEntity(value) || value)) {
+    let {chain, isSetSearch} = dispatchSearchSetAttributes(value);
+    chain.dispatch("insert query", {query: value})
+      .dispatch("set pane", {paneId: elem.paneId, contains: value})
+      .commit();
+  } else {
+    cm.focus();
+  }
+}
+
 function updateSearch(event, elem) {
   dispatch("ui update search", {paneId: elem.paneId, value: event.value}).commit();
 }
@@ -2567,7 +2597,7 @@ let _prepare:{[rep:string]: (results:{}[], params:{paneId?:string, [p:string]: a
       for(let field of fields) {
         var entityId = result[field];
         var paneId = params["paneId"];
-        var editor = prepareCardEditor(entityId, paneId);
+        // var editor = prepareCardEditor(entityId, paneId);
         entities.push({entity: result[field], data: params, editor});
       }
     }
