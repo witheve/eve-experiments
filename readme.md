@@ -4,7 +4,7 @@
 
 # Eve Experiments
 
-Eve-experiments is an archive of the projects we started and ended during our development of the Eve language. This archive represents over 4 years of research, so there's a lot in here. If you'd like to learn more about these experiments, read our [development diary](www.incidentalcomplexity.com), which chronicles our journey and highlights some of the more notable experiments.
+Eve-experiments is an archive of the projects we started and ended during our development of the Eve language. This archive represents over 4 years of research, so there's a lot in here. If you'd like to learn more about these experiments, read our [development diary](http://www.incidentalcomplexity.com), which chronicles our journey and highlights some of the more notable experiments.
 
 ## Notable Experiments
 
