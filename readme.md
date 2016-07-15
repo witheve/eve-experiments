@@ -20,15 +20,7 @@ Eve-experiments is an archive of the projects we started and ended during our de
 - REPLv1 - [description](http://incidentalcomplexity.com/2016/06/22/mar2/) | [link](https://github.com/witheve/eve-experiments/tree/90a6c6bc4597572a29c72119fc7bb964426f8107)
 - REPLv2 - [description](http://incidentalcomplexity.com/2016/06/30/apr/) | [link](https://github.com/witheve/eve-experiments/tree/e73b18d8111d5ddb73427bcb00f0501fdc9b8f2f)
 
-## Disclaimer
-
-The projects in this archive are experimental. As such, they are incomplete, undocuments, untested, and unstable. Do not use them for any critical projects.
-
-Furthermore, as this repository is an archive; we will not be fixing any issues or accepting any pull requests. We also won't be supporting any of the projects here.
-
-That said, if you like anything you see here and would like to see it developed further in the current version of Eve, [let the community know](https://groups.google.com/forum/#!forum/eve-talk)!
-
-### Join the Community
+### Join the Eve Community
 
 The Eve community is small but constantly growing, and everyone is welcome!
 
@@ -36,6 +28,14 @@ The Eve community is small but constantly growing, and everyone is welcome!
 - Impact the future of Eve by getting involved with our [Request for Comments](https://github.com/witheve/rfcs) process.
 - Read our [development diary](http://incidentalcomplexity.com/).
 - Follow us on [twitter](https://twitter.com/with_eve).
+
+## Disclaimer
+
+The projects in this archive are experimental. As such, they are incomplete, undocuments, untested, and unstable. Do not use them for any critical projects.
+
+Furthermore, as this repository is an archive; we will not be fixing any issues or accepting any pull requests. We also won't be supporting any of the projects here.
+
+That said, if you like anything you see here and would like to see it developed further in the current version of Eve, [let the community know](https://groups.google.com/forum/#!forum/eve-talk)!
 
 ## License 
 
