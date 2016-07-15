@@ -1,67 +1,42 @@
-# Eve
+<img src="http://www.witheve.com/logo.png" width="10%">
 
-Eve is a set of tools to help us think. Currently, those tools include a database, a temporal logic query language, and an IDE.
+*Eve is being actively developed at [witheve/eve](https://github.com/witheve/Eve).*
 
-## Quick start
+# Eve Experiments
 
-Eve relies on [TypeScript](http://www.typescriptlang.org/), node.js, and leiningen
+Eve-experiments is an archive of the projects we started and ended during our development of the Eve language. This archive represents over 4 years of research, so there's a lot in here. If you'd like to learn more about these experiments, read our [development diary](www.incidentalcomplexity.com), which chronicles our journey and highlights some of the more notable experiments.
 
-```
-npm install
-npm run dev
-cd server/
-lein run
-```
+## Notable Experiments
 
-Now go to `localhost:8081/repl` you can login with eve/eve
+- First Syntax - [description](http://incidentalcomplexity.com/2014/11/05/oct/) | [link](https://github.com/witheve/eve-experiments/tree/syntax)
+- FiveSquare - [description](http://incidentalcomplexity.com/2015/07/02/mar-jun/) | [link](https://github.com/witheve/eve-experiments/tree/d402bc4e4579007d53db3e01a82cf05d117c37ea)
+- GraphEve - [description](http://incidentalcomplexity.com/2015/10/15/jul-sept/) | [link](https://github.com/witheve/eve-experiments/tree/11ba1305dfd10fc2b385eae789c62c7c10edb0d1)
+- MadLibs - [description](http://incidentalcomplexity.com/2015/10/15/jul-sept/) | [link](https://github.com/witheve/eve-experiments/tree/11ba1305dfd10fc2b385eae789c62c7c10edb0d1/ui/experiments)
+- Copperfield - [description](https://gist.github.com/cmontella/05029cb67b5216ee838f4cb0b1f4ab98) | [link](https://github.com/witheve/eve-experiments/tree/af13f8d5f8a537d22c459f3e69e39b2736b16384/experimental/copperfield/ui)
+- GridEve - [description](http://incidentalcomplexity.com/2016/06/03/oct-nov/) | [link](https://github.com/witheve/eve-experiments/tree/af13f8d5f8a537d22c459f3e69e39b2736b16384/experimental/grideve)
+- CardWiki - [description](http://incidentalcomplexity.com/2016/06/03/oct-nov/) | [link](https://github.com/witheve/eve-experiments/tree/af13f8d5f8a537d22c459f3e69e39b2736b16384/experimental/cardwiki)
+- MarkdownEve - [description](http://incidentalcomplexity.com/2016/06/10/jan-feb/) | [link](https://github.com/witheve/eve-experiments/tree/a82f3411f541cf99c223ecd30a5cd3e80ea3dd2f)
+- WikiEve - [description](http://incidentalcomplexity.com/2016/06/10/jan-feb/) | [link](https://github.com/witheve/eve-experiments/tree/1fd5ac10bc00cfcf914e085262dac246532ca540)
+- REPLv1 - [description](http://incidentalcomplexity.com/2016/06/22/mar2/) | [link](https://github.com/witheve/eve-experiments/tree/90a6c6bc4597572a29c72119fc7bb964426f8107)
+- REPLv2 - [description](http://incidentalcomplexity.com/2016/06/30/apr/) | [link](https://github.com/witheve/eve-experiments/tree/e73b18d8111d5ddb73427bcb00f0501fdc9b8f2f)
 
-## Learn more
+## Disclaimer
 
-* [Rationale](https://github.com/witheve/Eve/blob/master/design/rationale.md)
-* [A note on visual programming](https://github.com/witheve/Eve/blob/master/design/visualProgramming.md)
+The projects in this archive are experimental. As such, they are incomplete, undocuments, untested, and unstable. Do not use them for any critical projects.
 
-## Reach out
+Furthermore, as this repository is an archive; we will not be fixing any issues or accepting any pull requests. We also won't be supporting any of the projects here.
 
-* [Mailing list](https://groups.google.com/forum/#!forum/eve-talk)
-* [Twitter](https://twitter.com/with_eve)
+That said, if you like anything you see here and would like to see it developed further in the current version of Eve, [let the community know](https://groups.google.com/forum/#!forum/eve-talk)!
 
-**DO NOT TRY TO BUILD PRODUCTION SOFTWARE WITH THIS** - It's full of dragons and other things that will eat your lunch, laundry, and any other l.*'s you have lying around.
+### Join the Community
 
-## How to contribute
+The Eve community is small but constantly growing, and everyone is welcome!
 
-*By contributing code to Eve, you are agreeing to release it under the Apache 2.0 License.*
+- Join our [mailing list](https://groups.google.com/forum/#!forum/eve-talk) and get involved with the latest discussions on Eve.
+- Impact the future of Eve by getting involved with our [Request for Comments](https://github.com/witheve/rfcs) process.
+- Read our [development diary](http://incidentalcomplexity.com/).
+- Follow us on [twitter](https://twitter.com/with_eve).
 
-Eve is moving fast, so before contributing make sure to talk to us so that we can help guide you in the right direction and prevent you from working on something that we might be switching gears on.
+## License 
 
-When contributing:
-
-* [Check out issues](https://github.com/witheve/Eve/labels/beginner) that are ready to be worked on. Feel free to ping a contributor if you need help along the way.
-* For any other contributions, please discuss with us as early as possible. We want your work to count.
-* We are not currently seeking refactoring contributions or code convention tweaks e.g. whitespace. This may change at a later point when we have automated tests and an explicit code convention.
-
-## How to report a bug
-
-When filing a bug on GitHub, please help us help you by including the following:
-
-* *Steps to reproduce the bug.*
-* Include a gist of the database in the issue (You can use the settings gear at the bottom, open the save panel, and hit the `save to gist` button to do this magically).
-* Your operating system and Eve version.
-
-If you just have questions, shoot those to the [mailing list](https://groups.google.com/forum/#!forum/eve-talk)!
-
-##License
-
-Eve is licensed under the Apache 2.0 license, see LICENSE for details.
-
-## Installation FAQ
-
-### Install fails on Ubuntu with error:
-```
-Eve requires tsc version "1.6.0-dev.20150731" but "" is installed.
-```
-
-Solution: This is not actually an error with the Typescript install, but a linking error with Node. In Ubuntu, the standard Node.js package is called nodejs, whereas on every other platform it is called node. Creating a symlink from nodejs to node solves the issues. e.g.
-```
-sudo ln -s /usr/bin/nodejs /usr/bin/node
-```
-
+All projects in this archive are licensed under the Apache 2.0 license, see LICENSE for details.
