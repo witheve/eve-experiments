@@ -33,7 +33,7 @@ The Eve community is small but constantly growing, and everyone is welcome!
 
 The projects in this archive are experimental. As such, they are incomplete, undocumented, untested, and unstable. Do not use them for any critical projects.
 
-Furthermore, as this repository is an archive; we will not be fixing any issues or accepting any pull requests. We also won't be supporting any of the projects here.
+Furthermore, as this repository is an archive, we will not be fixing any issues or accepting any pull requests. We also won't be supporting any of the projects here.
 
 That said, if you like anything you see here and would like to see it developed further in the current version of Eve, [let the community know](https://groups.google.com/forum/#!forum/eve-talk)!
 
