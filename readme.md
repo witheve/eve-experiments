@@ -31,7 +31,7 @@ The Eve community is small but constantly growing, and everyone is welcome!
 
 ## Disclaimer
 
-The projects in this archive are experimental. As such, they are incomplete, undocuments, untested, and unstable. Do not use them for any critical projects.
+The projects in this archive are experimental. As such, they are incomplete, undocumented, untested, and unstable. Do not use them for any critical projects.
 
 Furthermore, as this repository is an archive; we will not be fixing any issues or accepting any pull requests. We also won't be supporting any of the projects here.
 
