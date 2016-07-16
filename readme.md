@@ -1,4 +1,6 @@
-<img src="http://www.witheve.com/logo.png" width="10%">
+<p align="center">
+  <img src="http://www.witheve.com/logo.png" alt="Eve logo" width="10%" />
+</p>
 
 *Eve is being actively developed at [witheve/eve](https://github.com/witheve/Eve).*
 
