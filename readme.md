@@ -1,6 +1,4 @@
-# Eve
-
-Eve is a set of tools to help us think. Currently, those tools include a database, a temporal logic query language, and an IDE.
+# Eve Experiments
 
 ## Quick start
 
